@@ -6,9 +6,11 @@ import (
 )
 
 func TestTable(t *testing.T) {
-	// The standard has 2231 entries: 2125 with ";" and 106 legacy.
-	if n := Len(); n < 2200 || n > 2231 {
-		t.Errorf("table has %d entries, want about 2231", n)
+	// The standard has 2231 entries: 2125 with ";" and 106 legacy. The
+	// table was compared entry by entry with the WHATWG table (Python's
+	// html.entities.html5).
+	if n := Len(); n != 2125+106 {
+		t.Errorf("table has %d entries, want 2231", n)
 	}
 	legacy := 0
 	for k, v := range names {

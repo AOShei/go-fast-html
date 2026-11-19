@@ -31,8 +31,8 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 
 - [x] Repository setup, plan
 - [x] internal/charset (tests, fuzz)
-- [x] internal/entity (written from knowledge of entities.json; regenerate
-      with gen.go from the official file and diff, see NOTICE)
+- [x] internal/entity (compared entry by entry with the WHATWG table by
+      the orchestrator: 2,125 names and 106 legacy names, all correct)
 - [x] internal/lexer (tests, fuzz)
 - [x] internal/dom (tests, fuzz, depth/stack bounds)
 - [x] internal/css (tests, fuzz)

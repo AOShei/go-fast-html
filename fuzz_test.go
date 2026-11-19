@@ -11,6 +11,13 @@ import (
 
 // FuzzExtract runs the whole extractor on arbitrary input under small
 // limits and checks the document against the contract.
+//
+// Run the fuzz targets briefly, with a short minimization time:
+//
+//	go test -run XXX -fuzz FuzzExtract -fuzztime 20s -fuzzminimizetime=2s
+//
+// By default Go's fuzzer minimizes each new interesting input for up to
+// 60 s, during which it reports 0 execs/sec; that is not a slow input.
 func FuzzExtract(f *testing.F) {
 	for _, s := range []string{
 		"<h1>T</h1><p>a<b>b</b><ul><li>x<li>y</ul>",

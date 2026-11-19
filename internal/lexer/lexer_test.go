@@ -116,6 +116,7 @@ func TestOffsets(t *testing.T) {
 	}
 }
 
+// Run with -fuzzminimizetime=2s: see FuzzExtract in the root package.
 func FuzzLexer(f *testing.F) {
 	for _, s := range []string{
 		"<p class=x>a&amp;b</p>", "<script><!--<script>x</script>-->", "<!--x--!>",

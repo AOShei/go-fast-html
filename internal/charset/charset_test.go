@@ -99,6 +99,7 @@ func TestDecodeLimit(t *testing.T) {
 	}
 }
 
+// Run with -fuzzminimizetime=2s: see FuzzExtract in the root package.
 func FuzzCharset(f *testing.F) {
 	f.Add([]byte(`<meta charset="utf-8"><p>x`))
 	f.Add([]byte("\xFF\xFEa\x00"))

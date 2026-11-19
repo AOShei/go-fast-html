@@ -121,6 +121,7 @@ func TestDeepHiddenWithinStack(t *testing.T) {
 	check(d.Root)
 }
 
+// Run with -fuzzminimizetime=2s: see FuzzExtract in the root package.
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{
 		"<p>a<b>b<i>c</b>d</i>", "<table>x<tr><td>a<td>b</table>", "<svg><p>x</svg>",

@@ -66,6 +66,7 @@ func TestColor(t *testing.T) {
 	}
 }
 
+// Run with -fuzzminimizetime=2s: see FuzzExtract in the root package.
 func FuzzParse(f *testing.F) {
 	f.Add("display:none;color:rgb(1,2,3)")
 	f.Add("background: hsl(1 2% 3% / .5) url('a;b')")
