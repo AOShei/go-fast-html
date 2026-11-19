@@ -65,7 +65,8 @@ func TestTree(t *testing.T) {
 		{"<span style='opacity:0'>a</span><span style='color:transparent'>b</span>", `<span>"a"{transparent}</span><span>"b"{transparent}</span>`},
 		{"<details><summary>s</summary>d</details>", `<details><summary>"s"</summary>"d"{invisible}</details>`},
 		{"<template>t</template><noscript>n</noscript>", `<template>"t"{invisible}</template><noscript>"n"{invisible}</noscript>`},
-		{"<div aria-hidden=true>a</div><div style='position:absolute;left:-10000px'>b</div>", `<div>"a"{invisible}</div><div>"b"{off_page}</div>`},
+		{"<div aria-hidden=true>a</div><div style='position:absolute;left:-10000px'>b</div>", `<div>"a"</div><div>"b"{off_page}</div>`},
+		{"<div aria-hidden=true style='display:none'>a</div><p hidden aria-hidden=false>b</p>", `<div>"a"{invisible}</div><p>"b"{invisible}</p>`},
 		{"<script>var a='<p>'</script><style>p{}</style>", `<script>"var a='<p>'"{invisible}</script><style>"p{}"{invisible}</style>`},
 		{"a<!-- c -->b", `"a"<! c >"b"`},
 	} {

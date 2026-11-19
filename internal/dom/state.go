@@ -126,9 +126,8 @@ func (s state) child(name string, ns NS, attrs []lexer.Attr, style *css.Style) s
 	if _, ok := attr("hidden"); ok {
 		hiddenAttr = true
 	}
-	if v, ok := attr("aria-hidden"); ok && strings.EqualFold(strings.TrimSpace(v), "true") {
-		c.sticky |= gofastcore.HiddenInvisible
-	}
+	// aria-hidden hides content from screen readers only: a sighted
+	// reader sees it, so it is not a reason here.
 	if style != nil {
 		st := style
 		switch st.Display {

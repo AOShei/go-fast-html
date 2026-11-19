@@ -30,9 +30,11 @@ const (
 	Doctype
 )
 
-// Attr is one attribute of a tag, its name lowercased.
+// Attr is one attribute of a tag, its name lowercased. ValStart and
+// ValEnd are the byte range of the value in the input, quotes excluded.
 type Attr struct {
-	Name, Value string
+	Name, Value      string
+	ValStart, ValEnd int
 }
 
 // Token is one token. Start and End are byte offsets into the input.
@@ -291,6 +293,7 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 			i++
 		}
 		value := ""
+		vs, ve := i, i
 		if i < len(s) && s[i] == '=' {
 			i++
 			for i < len(s) && isSpace(s[i]) {
@@ -298,8 +301,17 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 			}
 			l.pos = i
 			value = l.attrValue()
+			vs, ve = i, l.pos
+			if vs < len(s) && (s[vs] == '"' || s[vs] == '\'') {
+				q := s[vs]
+				vs++
+				if ve > vs && s[ve-1] == q {
+					ve--
+				}
+			}
 			i = l.pos
 		}
+		a := Attr{Name: name, Value: value, ValStart: vs, ValEnd: max(ve, vs)}
 		if len(t.Attrs) == 16 && seen == nil {
 			seen = make(map[string]bool, 32)
 			for _, a := range t.Attrs {
@@ -310,10 +322,10 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 		case seen != nil:
 			if !seen[name] {
 				seen[name] = true
-				t.Attrs = append(t.Attrs, Attr{Name: name, Value: value})
+				t.Attrs = append(t.Attrs, a)
 			}
 		case !hasAttr(t.Attrs, name):
-			t.Attrs = append(t.Attrs, Attr{Name: name, Value: value})
+			t.Attrs = append(t.Attrs, a)
 		}
 	}
 }

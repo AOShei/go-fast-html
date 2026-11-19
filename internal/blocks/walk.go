@@ -119,6 +119,7 @@ func (w *walker) node(n *dom.Node) {
 
 func (w *walker) element(n *dom.Node) {
 	w.activeAttrs(n)
+	w.attrNotes(n)
 	if n.NS != dom.HTML {
 		// SVG and MathML: their text is shown where they stand.
 		w.inline(n, 0)

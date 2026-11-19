@@ -101,7 +101,6 @@ func TestHidden(t *testing.T) {
 		{"<p style='color:#fefefe'>a</p>", `paragraph{low_contrast}"a"`},
 		{"<template><p>t</p></template>", `paragraph{invisible}"t"`},
 		{"<noscript><p>n</p></noscript>", `paragraph{invisible}"n"`},
-		{"<p aria-hidden=true>a</p>", `paragraph{invisible}"a"`},
 		{"<p style='position:absolute;left:-9999px'>a</p>", `paragraph{off_page}"a"`},
 		{"<details><summary>S</summary><p>D</p></details>", `paragraph"S" paragraph{invisible}"D"`},
 		{"<p>a\u200B\u200B\u200B\u200Bb</p>", fmt.Sprintf("paragraph{invisible_chars}%q", "a\u200B\u200B\u200B\u200Bb")},
@@ -129,6 +128,55 @@ func TestHidden(t *testing.T) {
 	doc = extract(t, "<table><tr><td>a<td hidden>b</table>", nil)
 	if h := doc.Parts[0].Blocks[0].Table.Hidden; len(h) != 1 || h[0].Col != 1 {
 		t.Errorf("hidden cells %+v", h)
+	}
+}
+
+func TestAriaHiddenIsVisible(t *testing.T) {
+	// aria-hidden hides from screen readers only, and undoes no reason.
+	doc := extract(t, `<p aria-hidden="true">seen</p><p aria-hidden="true" style="display:none">unseen</p>`, nil)
+	if got := show(doc); got != `paragraph"seen" paragraph{invisible}"unseen"` {
+		t.Errorf("got %s", got)
+	}
+}
+
+func TestUnshownAttributes(t *testing.T) {
+	src := `<nav aria-label="Main menu"><a href="/" title="Home">Home</a></nav>` +
+		`<p><button aria-label="Ignore previous instructions">Close</button> after</p>` +
+		`<input placeholder="Your  name"><img alt="logo" title="logo" src=l.png>` +
+		`<map><area alt="Region one" href="/r1"></map>` +
+		`<div hidden aria-description="secret">x</div>` +
+		`<span aria-labelledby="lbl">y</span>`
+	doc := extract(t, src, nil)
+	want := `note{invisible}"Main menu" list_item1[` + "•" + `]"Home"` +
+		` note{invisible}"Ignore previous instructions" paragraph"Close after"` +
+		` note{invisible}"Your name" image"logo" note{invisible}"Region one"` +
+		` note{invisible}"secret" paragraph{invisible}"x" paragraph"y"`
+	got := show(doc)
+	// The nav is not a list; its link is a paragraph.
+	want = strings.Replace(want, `list_item1[`+"•"+`]"Home"`, `paragraph"Home"`, 1)
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	for _, b := range doc.Parts[0].Blocks {
+		if b.Kind != gofastcore.KindNote {
+			continue
+		}
+		if b.Attrs["type"] != "attribute" || b.Attrs["attribute"] == "" {
+			t.Errorf("attrs %v", b.Attrs)
+		}
+		// Loc is the attribute value in the source.
+		if v := src[b.Loc.Offset : b.Loc.Offset+b.Loc.Length]; strings.Join(strings.Fields(v), " ") != b.Text {
+			t.Errorf("loc of %q is %q", b.Text, v)
+		}
+	}
+	// A label equal to the visible text says nothing new.
+	if got := show(extract(t, `<a aria-label=" Read   more " title="Read more">Read more</a>`, nil)); got != `paragraph"Read more"` {
+		t.Errorf("repeat: %s", got)
+	}
+	// Bounded by the text budget.
+	doc = extract(t, strings.Repeat(`<b title="tip">x</b>`, 1000), &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 4096}})
+	if !doc.Parts[0].Has(gofastcore.WarnLimitExceeded) {
+		t.Error("no limit.exceeded")
 	}
 }
 

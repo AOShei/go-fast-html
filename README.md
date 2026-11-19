@@ -73,13 +73,19 @@ Hidden text is extracted and flagged, never dropped. Only the `style` attribute 
 
 | Reason | When |
 |---|---|
-| `invisible` | the `hidden` attribute (unless inline style gives another `display`); `display: none`; `visibility: hidden` or `collapse` (undone by `visible` inside); `template`, `noscript`, `noembed`, `noframes`, `iframe` fallback text; `script` and `style` text; `aria-hidden="true"`; a `details` without `open`, but for its `summary`; a `dialog` without `open`; `<input type=hidden>`; `rp`; comments |
+| `invisible` | the `hidden` attribute (unless inline style gives another `display`); `display: none`; `visibility: hidden` or `collapse` (undone by `visible` inside); `template`, `noscript`, `noembed`, `noframes`, `iframe` fallback text; `script` and `style` text; a `details` without `open`, but for its `summary`; a `dialog` without `open`; `<input type=hidden>`; `rp`; comments; the text of unshown attributes (below) |
 | `tiny` | an inline `font-size` (or `font`) under 2 points, relative sizes multiplied through |
 | `transparent` | `opacity` of 0.01 or less; `color: transparent` or a color with alpha 0 |
 | `low_contrast` | an inline or `<font color>` text color against the nearest inline `background`/`bgcolor`, white if none, by core's `LowContrast` |
 | `off_page` | `left`, `top`, `margin-left`, `margin-top` or `text-indent` of -999 pixels or less |
 | `clipped` | `clip: rect(...)` that shows nothing, `clip-path: inset(50%)`, or a width or height of 1 pixel or less with overflow hidden |
 | `invisible_chars` | core's scan |
+
+**`aria-hidden="true"` is not a reason.** It hides content from screen readers, not from sighted readers, so its text is visible content; it neither adds a reason nor removes one.
+
+**Unshown attributes.** Text a page stores in attributes and does not show is extracted and flagged `invisible`, since it reaches a consumer of the text as much as visible text does: `aria-label`, `aria-description`, `aria-roledescription`, `aria-placeholder`, `title` and `placeholder` on any element, and `alt` on an image map's `area`. Each becomes a `note` block with `Attrs` `type: attribute` and `attribute: <name>`, at the element's place (before the block the element is in, when that block has no text yet), with `Loc` the byte range of the attribute's value. A value that only repeats the element's visible text, or an image's alt text, after white space is collapsed, is left out. `aria-labelledby` and `aria-describedby` are not followed: the elements they name are read where they stand, flagged as their own visibility says.
+
+**Visually hidden text through stylesheets is not detected.** The common "screen-reader only" pattern (a class such as `sr-only` or `visually-hidden` whose stylesheet rule clips the text to one pixel or moves it off screen) is not flagged, because stylesheets are not evaluated. The same forms written in inline `style` are: `clip`/`clip-path` that shows nothing, a width or height of 1 pixel or less with overflow hidden (`clipped`), and a large negative offset (`off_page`).
 
 `Document.HiddenChecked` lists `invisible_chars`, and `invisible` too when the document has no stylesheet and no script: then inline style and attributes are all that decides what is displayed. The other reasons are never listed: their checks are partial (sizes from stylesheets, nested `small`, background images, positioning by other means).
 
@@ -111,7 +117,7 @@ Block quotes and lists in Markdown nest at most 100 deep (`md.MaxNest`); a marke
 
 ## Not read
 
-Stylesheets and scripts (not evaluated); `title` attributes (tooltips); `placeholder`; `alt` of `area`; `srcset`; `iframe srcdoc` (not extracted as an embedded document); CSS generated content; `<base href>` (addresses are as written); layout tables are tables. In Markdown: the GFM extensions other than tables, and front matter, as above.
+Stylesheets and scripts (not evaluated); `aria-labelledby`/`aria-describedby` references (not resolved); `srcset`; `iframe srcdoc` (not extracted as an embedded document); CSS generated content; `<base href>` (addresses are as written); layout tables are tables. In Markdown: the GFM extensions other than tables, and front matter, as above.
 
 ## Licence
 
