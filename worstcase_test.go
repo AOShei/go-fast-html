@@ -67,7 +67,9 @@ func TestWorstCase(t *testing.T) {
 		"md entities":   strings.Repeat("&#x10FFFF;&amp;&bogus;", n),
 		"md fences":     strings.Repeat("```\n", n),
 		"md setext":     strings.Repeat("a\n=\n", n),
-		"txt long line": strings.Repeat("word ", n*4),
+		"titled nest":   strings.Repeat(`<span title="`+strings.Repeat("t", 4000)+`">`, 600) + strings.Repeat("x", 20000),
+		"titles":        strings.Repeat(`<b aria-label="a" title="b" placeholder="c">x</b>`, n),
+		"txt long line":strings.Repeat("word ", n*4),
 		"txt blanks":    strings.Repeat("\n \n\f", n),
 	} {
 		cases[k] = v
