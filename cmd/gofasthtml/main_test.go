@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -17,6 +18,48 @@ func cli(t *testing.T, stdin string, args ...string) (string, string, int) {
 	var out, errw bytes.Buffer
 	code := run(context.Background(), args, strings.NewReader(stdin), &out, &errw)
 	return out.String(), errw.String(), code
+}
+
+func TestCommandEPUB(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range [][2]string{
+		{"mimetype", "application/epub+zip"},
+		{"META-INF/container.xml", `<container><rootfiles><rootfile full-path="c.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`},
+		{"c.opf", `<package version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata>
+<manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/><item id="b" href="b.xhtml" media-type="application/xhtml+xml"/>
+<item id="x" href="x.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="a"/><itemref idref="b"/></spine></package>`},
+		{"a.xhtml", "<p>first chapter</p>"},
+		{"b.xhtml", "<p>second chapter</p>"},
+		{"x.xhtml", "<p>beside the spine</p>"},
+	} {
+		w, _ := zw.Create(f[0])
+		w.Write([]byte(f[1]))
+	}
+	zw.Close()
+	p := filepath.Join(t.TempDir(), "book.epub")
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errs, code := cli(t, "", p)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var doc gofastcore.Document
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Source.Format != "epub" || len(doc.Parts) != 2 || len(doc.Children) != 1 || len(doc.Children[0].Parts) != 1 {
+		t.Errorf("document %s", out)
+	}
+	out, _, _ = cli(t, "", "-format", "text", "-parts", "2", p)
+	if strings.TrimSpace(out) != "second chapter" {
+		t.Errorf("-parts 2: %q", out)
+	}
 }
 
 func TestCommand(t *testing.T) {

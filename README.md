@@ -1,6 +1,6 @@
 # go-fast-html
 
-Extracts HTML, Markdown and plain text into the shared go-fast document model, `gofastcore.Document` (`github.com/AOShei/go-fast-core`). Standard library and go-fast-core only.
+Extracts HTML, Markdown, plain text and EPUB into the shared go-fast document model, `gofastcore.Document` (`github.com/AOShei/go-fast-core`). Standard library and go-fast-core only.
 
 ```go
 import "github.com/AOShei/go-fast-html" // package gofasthtml
@@ -10,7 +10,7 @@ if err != nil { ... }
 fmt.Print(doc.Markdown())
 ```
 
-`Source.Format` is `html`, `md` or `txt`. `Extractor.Format` sets the format; when it is empty, `Detect` decides it from `Options.Name` (`.html`, `.htm`, `.xhtml`, `.shtml`; `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`; `.txt`, `.text`) and, failing that, from the content: input that begins with markup, or has a tag of a common HTML element in its first 4 KiB, is HTML, and anything else plain text. Markdown is never guessed from content, since reading plain text as Markdown takes characters out of it.
+`Source.Format` is `html`, `md`, `txt` or `epub`. `Extractor.Format` sets the format; when it is empty, `Detect` decides it from `Options.Name` (`.html`, `.htm`, `.xhtml`, `.shtml`; `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`; `.txt`, `.text`; `.epub`) and, failing that, from the content: a zip archive whose `mimetype` member comes first and says `application/epub+zip` is EPUB, input that begins with markup, or has a tag of a common HTML element in its first 4 KiB, is HTML, and anything else plain text. Markdown is never guessed from content, since reading plain text as Markdown takes characters out of it.
 
 The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directories and standard input (`-`); `-as html|md|txt` sets the format, `-exclude-hidden` leaves hidden text out of Markdown and text output.
 
@@ -35,6 +35,18 @@ Encoding: a byte order mark, else UTF-8 if valid, else windows-1252.
 ### Plain text
 
 Plain text is decoded as Markdown is, and split into `paragraph` blocks at blank lines and form feeds. Line breaks inside a paragraph are kept as `\n`: a text file does not say whether its lines are wrapped prose or lines that mean something (an address, a verse, a list), and keeping them loses nothing. Trailing white space on each line and control characters other than tab are dropped. `Loc` gives each paragraph's byte range. `HiddenChecked` is `invisible_chars` only.
+
+### EPUB
+
+EPUB 2 and 3 publications (`Source.Format` `epub`, `.epub` or a zip whose first member says `application/epub+zip`) are read here rather than in a library of their own, since their content is XHTML and extractors do not import each other.
+
+- **Container.** The zip archive is read with a limit on members (`Extractor.MaxArchiveMembers`, default 100,000; more is `ErrLimitExceeded`) and every member decompressed within `Limits.MaxDecodedBytes`, shared with embedded documents. An archive whose central directory is missing (a file cut short) is read by the members' local headers, with `input.repaired`; a name that occurs twice gives `input.ambiguous` and the first is read. A missing or wrong `mimetype` member gives `epub.mimetype` (info) and the archive is read anyway. `META-INF/container.xml` leads to the package document (OPF); without one the input is `ErrMalformed`.
+- **Metadata.** `dc:title` (the first) to `Title`; each `dc:creator` to `Authors`; `dc:language` to `Language`; each `dc:subject` to `Keywords`; `dc:date` to `Created` when it parses as ISO 8601, and as written to `Extra["date"]`; `meta property="dcterms:modified"` to `Modified`; `dc:description`, `dc:publisher`, `dc:contributor`, `dc:rights`, `dc:source`, `dc:type`, `dc:format`, `dc:relation`, `dc:coverage` to `Extra` under their names; the identifiers to `Extra["identifier"]`, one a line, the package's unique identifier first; the package version to `Extra["epub_version"]`.
+- **Chapters.** One `chapter` part per spine item, numbered by its place in the spine, read by the HTML path in XHTML mode (a self-closing tag is an empty element; the XML declaration is not a comment). `Loc` offsets are into that chapter's file. `Part.Name` is the chapter's first entry in the table of contents, else its `<title>`. An item with `linear="no"` is extracted in its place and carries `epub.non_linear` (info). Images a chapter shows are resolved in the archive: `Image.ID` is the member's path, `MIME` the manifest's media type, and with `ImagesData` the bytes. References to members of the archive are not counted as external. `Options.Parts` selects chapters; `Limits.MaxParts` (default 100,000) bounds them.
+- **Navigation.** The EPUB 3 navigation document (`nav` with `epub:type="toc"`), else the EPUB 2 NCX, becomes `Outline`: title, nesting level and the number of the chapter it points to (0 when it points outside the spine). Titles count against the text budget before the first chapter.
+- **The rest of the manifest**, with the whole document only (`Options.Parts` unset): images no chapter shows go to a `stored` part as `image` blocks with `Attrs["stored"]` `manifest_item` and `Attrs["name"]` the member path (a cover image has the text `cover`); stylesheets are skipped; every other item (documents outside the spine, fonts, audio, scripts) is handed to `Options.ExtractChild` and listed in `Children`. Scripts count as active content.
+- **Encryption.** Resources `META-INF/encryption.xml` lists, font obfuscation (IDPF and Adobe) aside, are not read: an encrypted chapter is a part with `part.failed` and `epub.encrypted`, an encrypted embedded file a child with `child.encrypted`, and the document carries `epub.encrypted` with the count. When every selected chapter is encrypted (DRM), nothing usable is left and the result is `ErrUnsupported`.
+- **Hidden text** is checked in each chapter as in a page; `invisible` is listed in `HiddenChecked` only if no chapter has a stylesheet or a script, which in practice is rare.
 
 ## How HTML maps
 
@@ -103,6 +115,11 @@ Hidden text is extracted and flagged, never dropped. Only the `style` attribute 
 | `html.charset_unsupported` | warning | a declared encoding that is not decoded; read as windows-1252 |
 | `html.nesting_flattened` | warning | elements nested deeper than `Extractor.MaxDepth` (default 512), or more than 4096 open at once; below that their text is read side by side, with the reasons it is hidden kept |
 | `html.metadata_truncated` | info | a metadata value over 64 KiB, or more than 256 authors or keyword declarations |
+| `input.repaired`, `input.ambiguous` | warning | EPUB: the archive's directory was unreadable, or a member name occurs twice |
+| `epub.non_linear` | info | the chapter is `linear="no"` in the spine |
+| `epub.encrypted` | error | resources are encrypted (DRM) and were not read |
+| `epub.mimetype` | info | the `mimetype` member is missing or wrong |
+| `part.failed` | error | EPUB: a chapter could not be read (missing from the manifest or archive, encrypted) |
 
 ## Limits
 

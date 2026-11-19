@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/AOShei/go-fast-core"
@@ -45,6 +46,7 @@ var extensions = map[string]bool{
 	".html": true, ".htm": true, ".xhtml": true, ".shtml": true,
 	".md": true, ".markdown": true, ".mdown": true, ".mkd": true, ".mkdn": true, ".mdwn": true,
 	".txt": true, ".text": true,
+	".epub": true,
 }
 
 // hiddenFlag is --exclude-hidden: given alone it stands for every
@@ -86,7 +88,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	flags.SetOutput(stderr)
 	var (
 		format   = flags.String("format", "json", "what to print: json, markdown or text")
-		as       = flags.String("as", "", "read every input as html, md or txt (default: by extension, else by content)")
+		as       = flags.String("as", "", "read every input as html, md, txt or epub (default: by extension, else by content)")
+		parts    = flags.String("parts", "", "chapters of an EPUB to read, by number: 3, or 2-5")
+		members  = flags.Int("max-archive-members", 0, "files in an EPUB's archive (0: the default, 100,000; -1: no limit)")
 		output   = flags.String("o", "", "write to this file instead of standard output")
 		images   = flags.String("images", "meta", "pictures: meta (a block for each, with its alternative text), data (the bytes of data: URIs too) or none")
 		spans    = flags.Bool("spans", false, "report bold, italic and the like, and links, as spans")
@@ -101,7 +105,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	flags.Var(&exclude, "exclude-hidden", "in Markdown and text, leave out hidden text: all of it, or with =reasons only what is hidden for those reasons, such as invisible,tiny (JSON always has everything, flagged)")
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "usage: gofasthtml [flags] file-or-directory...")
-		fmt.Fprintln(stderr, "Extracts HTML, Markdown and plain text. A directory stands for the files of those kinds in it and below it; - is standard input.")
+		fmt.Fprintln(stderr, "Extracts HTML, Markdown, plain text and EPUB. A directory stands for the files of those kinds in it and below it; - is standard input.")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -126,9 +130,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return fail("unknown format %q: json, markdown or text", *format)
 	}
 	switch *as {
-	case "", "html", "md", "txt":
+	case "", "html", "md", "txt", "epub":
 	default:
-		return fail("unknown value %q for -as: html, md or txt", *as)
+		return fail("unknown value %q for -as: html, md, txt or epub", *as)
 	}
 	opts := gofastcore.Options{Spans: *spans}
 	opts.Limits.MaxInputBytes, opts.Limits.MaxDecodedBytes, opts.Limits.MaxTextBytes = *maxInput, *maxBytes, *maxText
@@ -142,7 +146,35 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	default:
 		return fail("unknown value %q for -images: none, meta or data", *images)
 	}
-	extractor := &gofasthtml.Extractor{Format: *as, MaxDepth: *maxDepth}
+	if *parts != "" {
+		first, last, ok := strings.Cut(*parts, "-")
+		if !ok {
+			last = first
+		}
+		a, err1 := strconv.Atoi(strings.TrimSpace(first))
+		b, err2 := strconv.Atoi(strings.TrimSpace(last))
+		if err1 != nil || err2 != nil || a < 1 || b < a {
+			return fail("-parts wants a number or a range such as 2-5, not %q", *parts)
+		}
+		opts.Parts = gofastcore.PartRange{First: a, Last: b}
+	}
+	extractor := &gofasthtml.Extractor{Format: *as, MaxDepth: *maxDepth, MaxArchiveMembers: *members}
+	// A document an EPUB holds besides its chapters is read too if it is
+	// one of the formats of this library, decided by its name and content.
+	children := &gofasthtml.Extractor{MaxDepth: *maxDepth, MaxArchiveMembers: *members}
+	opts.Child = func(ctx context.Context, name, mime string, r io.ReaderAt, size int64, o *gofastcore.Options) (*gofastcore.Document, error) {
+		switch mime {
+		case "application/xhtml+xml", "text/html":
+			return (&gofasthtml.Extractor{Format: "html", MaxDepth: *maxDepth}).Extract(ctx, r, size, o)
+		case "text/markdown":
+			return (&gofasthtml.Extractor{Format: "md", MaxDepth: *maxDepth}).Extract(ctx, r, size, o)
+		case "text/plain":
+			return (&gofasthtml.Extractor{Format: "txt"}).Extract(ctx, r, size, o)
+		case "application/epub+zip":
+			return children.Extract(ctx, r, size, o)
+		}
+		return nil, gofastcore.ErrUnsupported
+	}
 
 	var inputs []string
 	status := 0

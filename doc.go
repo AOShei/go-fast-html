@@ -1,5 +1,6 @@
-// Package gofasthtml extracts HTML, Markdown and plain text into the shared
-// go-fast document model, gofastcore.Document. Markdown is parsed as
+// Package gofasthtml extracts HTML, Markdown, plain text and EPUB into the
+// shared go-fast document model, gofastcore.Document. An EPUB is a part
+// for each chapter of its spine, read as XHTML. Markdown is parsed as
 // CommonMark (with GFM tables), rendered to HTML and read as a page is, so
 // its raw HTML gets the same checks; blocks are located in the Markdown.
 //
