@@ -21,6 +21,11 @@ type Config struct {
 	Decode *gofastcore.DecodeBudget
 	// Source maps an offset in the decoded text to one in the source.
 	Source func(int) int64
+	// Image resolves the address of an image inside the container the
+	// page is in; Internal reports an address inside it, which is not
+	// counted as an external reference. Both are nil for a page alone.
+	Image    func(src string) (ImageRef, bool)
+	Internal func(ref string) bool
 }
 
 // Result is what a walk produced.
@@ -151,7 +156,7 @@ func (w *walker) element(n *dom.Node) {
 		}
 		if loadsResource(rel) {
 			if href, _ := n.Attr("href"); strings.TrimSpace(href) != "" {
-				w.res.External++
+				w.external(href)
 			}
 		}
 		return
@@ -243,7 +248,7 @@ func (w *walker) element(n *dom.Node) {
 		return
 	case "form":
 		if a, _ := n.Attr("action"); strings.TrimSpace(a) != "" && !isScriptURL(a) {
-			w.res.External++
+			w.external(a)
 		}
 		w.block(n)
 		return
@@ -662,6 +667,15 @@ func (w *walker) srcRef(n *dom.Node, attr string) {
 	v, ok := n.Attr(attr)
 	v = strings.TrimSpace(v)
 	if !ok || v == "" || isScriptURL(v) || hasScheme(v, "data") {
+		return
+	}
+	w.external(v)
+}
+
+// external counts a reference to a resource, unless it is inside the
+// container the page is in.
+func (w *walker) external(ref string) {
+	if w.cfg.Internal != nil && w.cfg.Internal(strings.TrimSpace(ref)) {
 		return
 	}
 	w.res.External++

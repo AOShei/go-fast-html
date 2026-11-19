@@ -74,19 +74,24 @@ type Extractor struct {
 	// MaxDepth bounds how deeply elements nest in the tree that is read.
 	// Zero means DefaultMaxDepth.
 	MaxDepth int
+	// MaxArchiveMembers bounds the number of files in an EPUB's archive.
+	// Zero means DefaultMaxArchiveMembers; negative means no limit.
+	MaxArchiveMembers int
 }
 
 var _ gofastcore.Extractor = (*Extractor)(nil)
 
-var mimeTypes = map[string]string{"html": "text/html", "md": "text/markdown", "txt": "text/plain"}
+var mimeTypes = map[string]string{"html": "text/html", "md": "text/markdown", "txt": "text/plain", "epub": "application/epub+zip"}
 
 // Formats lists the formats this library extracts.
-func (e *Extractor) Formats() []string { return []string{"html", "md", "txt"} }
+func (e *Extractor) Formats() []string { return []string{"html", "md", "txt", "epub"} }
 
 // Detect decides the format of an input from its name, and failing that
 // from its content: a name ending in .html, .htm, .xhtml or .shtml is
 // HTML; .md, .markdown, .mdown, .mkd, .mkdn or .mdwn Markdown; .txt or
-// .text plain text. Without one of those, an input that begins with
+// .text plain text; .epub EPUB. A zip archive whose first member is
+// "mimetype" saying application/epub+zip is EPUB whatever its name.
+// Without one of those, an input that begins with
 // markup, or has a tag of a common HTML element in its first 4 KiB, is
 // HTML, and any other plain text: Markdown is not guessed from content,
 // since reading plain text as Markdown would take characters out of it.
@@ -98,6 +103,11 @@ func Detect(name string, src []byte) string {
 		return "md"
 	case ".txt", ".text":
 		return "txt"
+	case ".epub":
+		return "epub"
+	}
+	if bytes.HasPrefix(src, []byte("PK\x03\x04")) && len(src) >= 58 && string(src[30:58]) == "mimetypeapplication/epub+zip" {
+		return "epub"
 	}
 	head := src[:min(len(src), 4096)]
 	if bytes.HasPrefix(head, []byte{0xFF, 0xFE}) || bytes.HasPrefix(head, []byte{0xFE, 0xFF}) {
@@ -195,9 +205,6 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	if size > gofastcore.ResolveLimit(opts.Limits.MaxInputBytes, DefaultMaxInputBytes) {
 		return nil, fmt.Errorf("gofasthtml: input of %d bytes is larger than the limit: %w", size, gofastcore.ErrLimitExceeded)
 	}
-	if !opts.Parts.Contains(1) || opts.Parts.Last != 0 && opts.Parts.First > opts.Parts.Last {
-		return nil, fmt.Errorf("gofasthtml: a document has one part: %w", gofastcore.ErrNoPartsSelected)
-	}
 	src := make([]byte, size)
 	if n, err := r.ReadAt(src, 0); n < len(src) {
 		if err == nil || errors.Is(err, io.EOF) {
@@ -214,6 +221,9 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	if !known {
 		return nil, fmt.Errorf("gofasthtml: format %q: %w", format, gofastcore.ErrUnsupported)
 	}
+	if format != "epub" && (!opts.Parts.Contains(1) || opts.Parts.Last != 0 && opts.Parts.First > opts.Parts.Last) {
+		return nil, fmt.Errorf("gofasthtml: a document has one part: %w", gofastcore.ErrNoPartsSelected)
+	}
 
 	ctx, text := gofastcore.WithTextBudget(ctx, opts.Limits)
 	defer text.Close()
@@ -222,15 +232,87 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 
 	doc := gofastcore.New(format)
 	doc.Source = gofastcore.Source{Format: format, Name: opts.Name, MIME: mime, Size: size}
+	if format == "epub" {
+		return e.epub(ctx, doc, src, opts, text, decode)
+	}
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
+	t := &tally{plain: format == "txt"}
+	res, err := e.page(ctx, src, format, pageConfig{opts: opts, text: text, decode: decode}, &part, t)
+	if err != nil {
+		return nil, err
+	}
+	if res != nil {
+		doc.Metadata = res.Meta
+	}
+	doc.Parts = append(doc.Parts, part)
+	t.finish(doc)
+	return doc, nil
+}
 
+// tally collects what the pages of a document found that concerns the
+// document as a whole.
+type tally struct {
+	plain                         bool // only plain text: nothing can hide text
+	active, external, stylesheets int
+	metaCut                       bool
+	charsets                      []string // declared encodings not decoded
+}
+
+// finish adds the document's warnings and HiddenChecked.
+func (t *tally) finish(doc *gofastcore.Document) {
+	for _, c := range t.charsets {
+		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
+			fmt.Sprintf("the document declares the encoding %q, which is not decoded; it was read as windows-1252", c))
+	}
+	if t.active > 0 {
+		doc.Warn(gofastcore.SeverityInfo, gofastcore.WarnInputActiveContent,
+			fmt.Sprintf("%d scripts, event handler attributes or javascript: addresses; script text is read as data, flagged invisible, and nothing is run", t.active))
+	}
+	if t.external > 0 {
+		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnInputExternalReference,
+			fmt.Sprintf("%d resources loaded from elsewhere, not counting hyperlinks; nothing was fetched", t.external))
+	}
+	if t.metaCut {
+		doc.Warn(gofastcore.SeverityInfo, WarnMetadataTruncated, "a metadata value was cut at 64 KiB, or declarations past 256 were left out")
+	}
+	// Without stylesheets or scripts, inline style and attributes are all
+	// that decides what is displayed, and that is read in full. Plain
+	// text has no way to hide text, but only the scan for invisible
+	// characters is claimed for it.
+	doc.HiddenChecked = gofastcore.HiddenChars
+	if !t.plain && t.stylesheets == 0 && t.active == 0 {
+		doc.HiddenChecked |= gofastcore.HiddenInvisible
+	}
+	if hiddenInMetadata(&doc.Metadata) {
+		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextHidden, "the metadata contains invisible characters")
+	}
+}
+
+// pageConfig is what reading one page needs besides its bytes.
+type pageConfig struct {
+	opts   *gofastcore.Options
+	text   *gofastcore.TextBudget
+	decode *gofastcore.DecodeBudget
+	// xhtml reads self-closing tags as XML does (EPUB content).
+	xhtml bool
+	// image resolves an image address, as for EPUB, where images are in
+	// the archive.
+	image    func(src string) (blocks.ImageRef, bool)
+	internal func(ref string) bool
+}
+
+// page reads one document, an HTML page, Markdown or plain text, or a
+// chapter of an EPUB, into part, and calls MarkHidden on it. What
+// concerns the whole document goes to t. It returns the result of the
+// walk, nil for plain text.
+func (e *Extractor) page(ctx context.Context, src []byte, format string, pc pageConfig, part *gofastcore.Part, t *tally) (*blocks.Result, error) {
+	opts, text, decode := pc.opts, pc.text, pc.decode
 	enc := charset.SniffText(src)
 	if format == "html" {
 		enc = charset.Sniff(src)
 	}
 	if enc.Unsupported {
-		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
-			fmt.Sprintf("the document declares the encoding %q, which is not decoded; it was read as windows-1252", blocksLabel(enc.Declared)))
+		t.charsets = append(t.charsets, blocksLabel(enc.Declared))
 	}
 	decoded, m, invalid, cut := charset.Decode(src, enc, max(decode.Left(), 0))
 	decode.Take(int64(len(decoded)))
@@ -244,7 +326,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	}
 
 	if format == "txt" {
-		spent := plainText(ctx, decoded, m.Source, text, &part)
+		spent := plainText(ctx, decoded, m.Source, text, part)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -257,9 +339,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 			part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")
 		}
 		part.MarkHidden()
-		doc.Parts = append(doc.Parts, part)
-		doc.HiddenChecked = gofastcore.HiddenChars
-		return doc, nil
+		return nil, nil
 	}
 
 	page, source := decoded, m.Source
@@ -280,7 +360,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 		source = func(i int) int64 { return m.Source(h.Source(i)) }
 	}
 
-	tree, err := dom.Parse(ctx, page, dom.Options{MaxDepth: e.MaxDepth})
+	tree, err := dom.Parse(ctx, page, dom.Options{MaxDepth: e.MaxDepth, XHTML: pc.xhtml})
 	if err != nil {
 		return nil, err
 	}
@@ -289,31 +369,23 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 			"elements are nested deeper than the limit; below it they were read side by side")
 	}
 	res, err := blocks.Walk(ctx, tree.Root, blocks.Config{
-		Spans: opts.Spans, Images: opts.Images, Budget: text, Decode: decode, Source: source,
+		Spans: opts.Spans, Images: opts.Images, Budget: text, Decode: decode, Source: source, Image: pc.image, Internal: pc.internal,
 	})
 	if err != nil {
 		return nil, err
 	}
 	part.Blocks = res.Blocks
-	doc.Metadata = res.Meta
 	if res.Cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-			"the limit on the amount of text was reached; the body is cut off there")
+			"the limit on the amount of text was reached; the "+part.Kind.String()+" is cut off there")
 	}
-	if res.Active > 0 {
-		doc.Warn(gofastcore.SeverityInfo, gofastcore.WarnInputActiveContent,
-			fmt.Sprintf("%d scripts, event handler attributes or javascript: addresses; script text is read as data, flagged invisible, and nothing is run", res.Active))
-	}
-	if res.External > 0 {
-		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnInputExternalReference,
-			fmt.Sprintf("%d resources loaded from elsewhere, not counting hyperlinks; nothing was fetched", res.External))
-	}
+	t.active += res.Active
+	t.external += res.External
+	t.stylesheets += res.Stylesheets
+	t.metaCut = t.metaCut || res.MetaCut
 	if res.ImageData > 0 && opts.Images == gofastcore.ImagesData {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnImageUnsupportedEncoding,
-			fmt.Sprintf("%d inline data: images could not be decoded; their blocks have no data", res.ImageData))
-	}
-	if res.MetaCut {
-		doc.Warn(gofastcore.SeverityInfo, WarnMetadataTruncated, "a metadata value was cut at 64 KiB, or declarations past 256 were left out")
+			fmt.Sprintf("%d images could not be decoded or read; their blocks have no data", res.ImageData))
 	}
 	if !res.Cut && !cut {
 		hasText := false
@@ -332,18 +404,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 		}
 	}
 	part.MarkHidden()
-	doc.Parts = append(doc.Parts, part)
-
-	// Without stylesheets or scripts, inline style and attributes are all
-	// that decides what is displayed, and that is read in full.
-	doc.HiddenChecked = gofastcore.HiddenChars
-	if res.Stylesheets == 0 && res.Active == 0 {
-		doc.HiddenChecked |= gofastcore.HiddenInvisible
-	}
-	if hiddenInMetadata(&doc.Metadata) {
-		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextHidden, "the metadata contains invisible characters")
-	}
-	return doc, nil
+	return res, nil
 }
 
 // blocksLabel makes a declared encoding label safe to quote.

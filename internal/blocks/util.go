@@ -82,7 +82,7 @@ func (w *walker) image(n *dom.Node) {
 	src = strings.TrimSpace(src)
 	data := hasScheme(src, "data")
 	if src != "" && !data && !isScriptURL(src) {
-		w.res.External++
+		w.external(src)
 	}
 	if w.cfg.Images == gofastcore.ImagesNone {
 		return
@@ -111,6 +111,15 @@ func (w *walker) image(n *dom.Node) {
 		} else {
 			w.res.ImageData++
 		}
+	} else if ref, ok := w.resolve(src); ok {
+		img.ID, img.MIME = ref.ID, ref.MIME
+		if w.cfg.Images == gofastcore.ImagesData {
+			if d, ok := ref.Data(); ok {
+				img.Data = d
+			} else {
+				w.res.ImageData++
+			}
+		}
 	} else if src != "" {
 		img.ID = cleanRef(src)
 		if len(img.ID) > 2048 {
@@ -120,6 +129,21 @@ func (w *walker) image(n *dom.Node) {
 	}
 	w.later(gofastcore.Block{Kind: gofastcore.KindImage, Text: cleanProse(alt, true), Image: img,
 		Hidden: n.Hidden | w.extra, Loc: w.loc(n.Start, n.End, anchorOf(n))})
+}
+
+// ImageRef is an image a page refers to that is inside the container the
+// page is in (an EPUB).
+type ImageRef struct {
+	ID, MIME string
+	// Data reads the image's bytes, within the decode budget.
+	Data func() ([]byte, bool)
+}
+
+func (w *walker) resolve(src string) (ImageRef, bool) {
+	if w.cfg.Image == nil || src == "" {
+		return ImageRef{}, false
+	}
+	return w.cfg.Image(src)
 }
 
 // dataURI decodes a data: URI within the decode budget.
@@ -185,6 +209,13 @@ func textOf(n *dom.Node) []byte {
 	}
 	walk(n)
 	return out
+}
+
+// Clean makes a string read from outside a page (EPUB metadata, a table
+// of contents) into prose: invalid UTF-8 replaced, white space collapsed,
+// control characters dropped, ligatures written as letters.
+func Clean(s string) string {
+	return cleanProse(strings.ToValidUTF8(s, "�"), true)
 }
 
 // cleanProse collapses white space (keeping line breaks when lines is

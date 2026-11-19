@@ -27,6 +27,8 @@ const (
 type Options struct {
 	MaxDepth int
 	MaxStack int
+	// XHTML reads self-closing tags as empty elements (EPUB content).
+	XHTML bool
 }
 
 // Doc is a parsed document.
@@ -62,6 +64,7 @@ type builder struct {
 	seenHead bool
 	seenBody bool
 	styles   map[*lexer.Attr]*css.Style
+	xhtml    bool
 }
 
 // Parse builds the tree of src, which must be UTF-8. It returns ctx's
@@ -73,6 +76,7 @@ func Parse(ctx context.Context, src []byte, opt Options) (*Doc, error) {
 		maxDepth: int32(opt.MaxDepth),
 		maxStack: opt.MaxStack,
 		clones:   len(src)/4 + 4096,
+		xhtml:    opt.XHTML,
 	}
 	if b.maxDepth <= 0 {
 		b.maxDepth = DefaultMaxDepth
@@ -109,6 +113,11 @@ func (b *builder) token(t *lexer.Token) {
 	case lexer.Text:
 		b.text(t)
 	case lexer.Comment:
+		if b.xhtml && strings.HasPrefix(t.Data, "?") {
+			// An XML declaration or processing instruction, not a
+			// comment, in XHTML.
+			return
+		}
 		top := b.top()
 		n := &Node{Type: CommentNode, Text: []byte(t.Data), Start: t.Start, End: t.End, Hidden: top.st.textHidden()}
 		b.attach(top.box, n, nil)
@@ -331,7 +340,27 @@ func (b *builder) currentIs(names ...string) bool {
 	return false
 }
 
+// startTag handles a start tag. In XHTML a self-closing tag is an empty
+// element, as XML has it, where HTML would leave the element open.
 func (b *builder) startTag(t *lexer.Token) {
+	if !b.xhtml || !t.SelfClosing || void[t.Name] {
+		b.startTagHTML(t)
+		return
+	}
+	n := len(b.stack)
+	b.startTagHTML(t)
+	b.lx.SetRaw(lexer.Data, "")
+	b.skipLF = false
+	if len(b.stack) > n {
+		top := b.top().node
+		if top.Name == t.Name || t.Name == "image" && top.Name == "img" {
+			b.popTo(len(b.stack) - 1)
+			b.removeAfe(top)
+		}
+	}
+}
+
+func (b *builder) startTagHTML(t *lexer.Token) {
 	name := t.Name
 	if name == "image" {
 		name = "img"
