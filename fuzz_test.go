@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"time"
 
 	"github.com/AOShei/go-fast-core"
 )
@@ -24,6 +25,13 @@ func FuzzExtract(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, b []byte) {
+		start := time.Now()
+		defer func() {
+			// Inputs are small; a slow one is a cost a file can impose.
+			if d := time.Since(start); d > time.Second {
+				t.Fatalf("%d bytes took %v", len(b), d)
+			}
+		}()
 		for _, opts := range []*gofastcore.Options{
 			{Spans: true, Images: gofastcore.ImagesData},
 			{Limits: gofastcore.Limits{MaxTextBytes: 2048, MaxDecodedBytes: 4096}},
