@@ -383,6 +383,6 @@ var inlineStyle = map[string]gofastcore.Style{
 	"u": gofastcore.StyleUnderline, "ins": gofastcore.StyleUnderline,
 	"s": gofastcore.StyleStrike, "strike": gofastcore.StyleStrike, "del": gofastcore.StyleStrike,
 	"code": gofastcore.StyleCode, "kbd": gofastcore.StyleCode, "samp": gofastcore.StyleCode,
-	"tt": gofastcore.StyleCode,
+	"tt":  gofastcore.StyleCode,
 	"sub": gofastcore.StyleSub, "sup": gofastcore.StyleSuper,
 }

@@ -258,6 +258,7 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 		i++
 	}
 	t.Name = lowerName(s[p:i])
+	var seen map[string]bool // the names so far, once there are many
 	for {
 		// Before attribute name.
 		for i < len(s) && (isSpace(s[i]) || s[i] == '/' && (i+1 >= len(s) || s[i+1] != '>')) {
@@ -299,7 +300,19 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 			value = l.attrValue()
 			i = l.pos
 		}
-		if !hasAttr(t.Attrs, name) {
+		if len(t.Attrs) == 16 && seen == nil {
+			seen = make(map[string]bool, 32)
+			for _, a := range t.Attrs {
+				seen[a.Name] = true
+			}
+		}
+		switch {
+		case seen != nil:
+			if !seen[name] {
+				seen[name] = true
+				t.Attrs = append(t.Attrs, Attr{Name: name, Value: value})
+			}
+		case !hasAttr(t.Attrs, name):
 			t.Attrs = append(t.Attrs, Attr{Name: name, Value: value})
 		}
 	}
