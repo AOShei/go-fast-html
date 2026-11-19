@@ -1,0 +1,21 @@
+go-fast-html
+Copyright (c) 2025 Andrew O'Shei. MIT License (see LICENSE).
+
+Data tables taken from specifications:
+
+internal/entity/entities.txt
+  The named character references of the WHATWG HTML Living Standard,
+  section 13.5 "Named character references", whose machine-readable form
+  is https://html.spec.whatwg.org/entities.json. The HTML Standard is
+  (c) WHATWG (Apple, Google, Mozilla, Microsoft) and licensed under the
+  Creative Commons Attribution 4.0 International License.
+  The file in this repository was written from the content of that list
+  without network access; internal/entity/gen.go regenerates it from
+  entities.json, and the result should be compared with it.
+
+internal/charset/charset.go (win1252High) and the encoding labels
+  From the WHATWG Encoding Standard (index-windows-1252 and the table of
+  encoding labels), (c) WHATWG, CC BY 4.0.
+
+internal/css/color.go (namedColors)
+  The named colors of the W3C CSS Color Module Level 4, section 6.1.

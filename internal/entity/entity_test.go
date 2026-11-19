@@ -28,6 +28,7 @@ func TestTable(t *testing.T) {
 }
 
 func TestNamed(t *testing.T) {
+	// Expected replacements are written as UTF-8 byte escapes.
 	for _, c := range []struct {
 		in, repl string
 		n        int
@@ -36,11 +37,11 @@ func TestNamed(t *testing.T) {
 		{"amp;", "&", 4, true, true},
 		{"amp", "&", 3, false, true},
 		{"ampx", "&", 3, false, true},
-		{"notin;", "∉", 6, true, true},
-		{"notit;", "¬", 3, false, true},
-		{"nbsp", " ", 4, false, true},
-		{"CounterClockwiseContourIntegral;", "∳", 32, true, true},
-		{"NotEqualTilde;", "≂̸", 14, true, true},
+		{"notin;", "\xE2\x88\x89", 6, true, true},
+		{"notit;", "\xC2\xAC", 3, false, true},
+		{"nbsp", "\xC2\xA0", 4, false, true},
+		{"CounterClockwiseContourIntegral;", "\xE2\x88\xB3", 32, true, true},
+		{"NotEqualTilde;", "\xE2\x89\x82\xCC\xB8", 14, true, true},
 		{"fjlig;", "fj", 6, true, true},
 		{"xyz;", "", 0, false, false},
 		{"alpha", "", 0, false, false},

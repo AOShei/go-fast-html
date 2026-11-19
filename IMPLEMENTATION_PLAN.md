@@ -29,15 +29,32 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 
 ## Status
 
-- [ ] Repository setup, plan
-- [ ] internal/charset
-- [ ] internal/entity
-- [ ] internal/lexer
-- [ ] internal/dom
-- [ ] internal/css
-- [ ] internal/blocks + public API
-- [ ] Tests (fixtures, Validate, limits, hidden), fuzz targets
-- [ ] README, NOTICE
+- [x] Repository setup, plan
+- [x] internal/charset (tests, fuzz)
+- [x] internal/entity (written from knowledge of entities.json; regenerate
+      with gen.go from the official file and diff, see NOTICE)
+- [x] internal/lexer (tests, fuzz)
+- [x] internal/dom (tests, fuzz, depth/stack bounds)
+- [x] internal/css (tests, fuzz)
+- [x] internal/blocks + public API (`extract.go`, `doc.go`)
+- [x] Tests: structure, hidden, metadata, locations, charset, spans,
+      warnings, images, errors, budgets, worst cases, FuzzExtract with
+      Validate, source hygiene, imports
+- [x] README, NOTICE
+- [ ] Unit tests for internal/blocks directly (covered through the root
+      package today)
 - [ ] Markdown (run 2)
 - [ ] Plain text (run 2)
-- [ ] CLI (run 2)
+- [ ] CLI `cmd/gofasthtml` in the style of go-fast-ooxml's (run 2)
+
+## Open items from phase 1
+
+- Layout tables (a whole page in table cells) are emitted as one table;
+  detecting them and emitting their content as blocks is not done.
+- `iframe srcdoc` could be handed to `Options.ExtractChild` as an
+  embedded HTML document.
+- `placeholder`, `title` attributes and `area alt` are not read.
+- Tables are not split into several blocks when very long (core allows
+  `Continued` pieces); only the text budget bounds them.
+- Run a differential check of the tree builder against html5lib-tests
+  tree-construction data if it can be obtained (not available offline).

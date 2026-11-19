@@ -15,7 +15,7 @@ func FuzzExtract(f *testing.F) {
 		"<h1>T</h1><p>a<b>b</b><ul><li>x<li>y</ul>",
 		"<table><tr><td rowspan=0 colspan=3>a<td>b<tr><td>c</table>",
 		"<p hidden>h<span style='display:block;color:#fff'>v</span>",
-		"<pre>\n codeﬁ</pre><script>x<!--<script></script>-->y</script>",
+		"<pre>\n code\xEF\xAC\x81</pre><script>x<!--<script></script>-->y</script>",
 		"<meta charset=windows-1252><p>caf\xE9<!-- c --><img alt=a src=data:,x>",
 		"\xFF\xFE<\x00p\x00>\x00x\x00",
 		"<select><option>a<option>b</select><input type=hidden value=v>",

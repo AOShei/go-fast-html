@@ -41,8 +41,8 @@ func TestDecodeMap(t *testing.T) {
 	}{
 		{"a\xE9b\x80c", "aéb€c"},
 		{"\xFF\xFEa\x00\xE9\x00=\xD8\x00\xDEz\x00", "aé\U0001F600z"},
-		{"\xFE\xFF\x00a\xD8\x00", "a�"},
-		{"<meta charset=utf-8>\xC3(", "<meta charset=utf-8>�("},
+		{"\xFE\xFF\x00a\xD8\x00", "a\xEF\xBF\xBD"},
+		{"<meta charset=utf-8>\xC3(", "<meta charset=utf-8>\xEF\xBF\xBD("},
 	} {
 		src := []byte(c.src)
 		r := Sniff(src)
