@@ -140,6 +140,11 @@ func FuzzLexer(f *testing.F) {
 				t.Fatalf("no progress at %d", last)
 			}
 			last = l.Pos()
+			for _, a := range tok.Attrs {
+				if a.ValStart > a.ValEnd || a.ValEnd > len(s) || a.ValStart < tok.Start {
+					t.Fatalf("attribute %+v outside token %+v", a, tok)
+				}
+			}
 			if tok.Kind == StartTag && tok.Name == "script" {
 				l.SetRaw(ScriptData, "script")
 			}
