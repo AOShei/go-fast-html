@@ -552,5 +552,5 @@ func hexVal(c byte) byte {
 	if isDigit(c) {
 		return c - '0'
 	}
-	return c|0x20 - 'a' + 10
+	return c | 0x20 - 'a' + 10
 }

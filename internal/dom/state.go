@@ -22,10 +22,10 @@ type state struct {
 	// color is the text color and bg the background painted behind the
 	// element, composited, when inline style or a legacy attribute sets
 	// them.
-	color, bg         css.RGBA
-	colorSet, bgSet   bool
-	ws                WS
-	closedDetails     bool // a <details> without open: its text is hidden but for its summary
+	color, bg       css.RGBA
+	colorSet, bgSet bool
+	ws              WS
+	closedDetails   bool // a <details> without open: its text is hidden but for its summary
 }
 
 const defaultFontPt = 12
