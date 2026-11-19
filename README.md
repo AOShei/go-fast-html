@@ -1,6 +1,6 @@
 # go-fast-html
 
-Extracts HTML into the shared go-fast document model, `gofastcore.Document` (`github.com/AOShei/go-fast-core`). Markdown and plain text will follow. Standard library and go-fast-core only.
+Extracts HTML, Markdown and plain text into the shared go-fast document model, `gofastcore.Document` (`github.com/AOShei/go-fast-core`). Standard library and go-fast-core only.
 
 ```go
 import "github.com/AOShei/go-fast-html" // package gofasthtml
@@ -10,7 +10,11 @@ if err != nil { ... }
 fmt.Print(doc.Markdown())
 ```
 
-**Status:** HTML is read; Markdown, plain text and the command `cmd/gofasthtml` are not written yet. See `IMPLEMENTATION_PLAN.md`.
+`Source.Format` is `html`, `md` or `txt`. `Extractor.Format` sets the format; when it is empty, `Detect` decides it from `Options.Name` (`.html`, `.htm`, `.xhtml`, `.shtml`; `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`; `.txt`, `.text`) and, failing that, from the content: input that begins with markup, or has a tag of a common HTML element in its first 4 KiB, is HTML, and anything else plain text. Markdown is never guessed from content, since reading plain text as Markdown takes characters out of it.
+
+The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directories and standard input (`-`); `-as html|md|txt` sets the format, `-exclude-hidden` leaves hidden text out of Markdown and text output.
+
+**Status:** see `IMPLEMENTATION_PLAN.md`.
 
 ## What is read
 
@@ -20,7 +24,19 @@ The library has its own HTML5 parser under `internal/`, since the standard libra
 - **Tokenizer** (`internal/lexer`), following the WHATWG tokenization rules for data, RCDATA (`title`, `textarea`), RAWTEXT (`style`, `xmp`, `iframe`, `noembed`, `noframes`), script data with its escaped and double-escaped states, PLAINTEXT, tags and attributes, comments, bogus comments, DOCTYPE, CDATA in SVG and MathML, and character references: the full table of named references (`internal/entity`) with the rule for legacy names without a semicolon, and numeric references with the standard's replacements.
 - **Tree** (`internal/dom`), built the way browsers recover from tag soup: implied end tags (`p`, `li`, `dd`, `dt`, `option`, table rows and cells), headings that close headings, misnested formatting elements (a simplified adoption agency algorithm), formatting reopened after a block closes it, content misplaced in a table moved in front of it (foster parenting), SVG and MathML with the HTML elements that break out of them. `noscript` is read with scripting off, as its content.
 
-## How it maps
+### Markdown
+
+Markdown (`internal/md`) is parsed with the block and inline structure of CommonMark 0.31: ATX and setext headings, paragraphs, block quotes, bullet and ordered lists with nesting and tight/loose lists, fenced and indented code, thematic breaks, HTML blocks, link reference definitions; emphasis by the delimiter algorithm, code spans, inline and reference links and images, autolinks, raw inline HTML, entity and numeric references, backslash escapes, hard breaks. GFM tables are read; other GFM extensions (task lists, strikethrough, bare-URL autolinks, footnotes) are not, and their characters stay in the text. Front matter is not recognized.
+
+The document is rendered to HTML as a CommonMark renderer does and read by the HTML path above, so the blocks come out as in the table below (emphasis markers are gone; a link is a link span; code is declared code, verbatim, with the fence's language). Raw HTML in Markdown is read exactly as in a page: it gets the same hidden-text checks, and an HTML comment is a flagged `note`. `Loc.Offset` and `Loc.Length` are into the Markdown source: the lines of the Markdown block a block came from, and for raw HTML the exact bytes of its element.
+
+Encoding: a byte order mark, else UTF-8 if valid, else windows-1252.
+
+### Plain text
+
+Plain text is decoded as Markdown is, and split into `paragraph` blocks at blank lines and form feeds. Line breaks inside a paragraph are kept as `\n`: a text file does not say whether its lines are wrapped prose or lines that mean something (an address, a verse, a list), and keeping them loses nothing. Trailing white space on each line and control characters other than tab are dropped. `Loc` gives each paragraph's byte range. `HiddenChecked` is `invisible_chars` only.
+
+## How HTML maps
 
 One part of kind `body`, numbered 1. Every block has `Loc.Offset` and `Loc.Length`, its byte range in the source file (also when the file is UTF-16 or windows-1252), and `Loc.Anchor` from the `id` of its element, or of an element in it (`<a name>` counts).
 
@@ -87,15 +103,15 @@ Hidden text is extracted and flagged, never dropped. Only the `style` attribute 
 | Limit | Default | |
 |---|---|---|
 | `Limits.MaxInputBytes` | 256 MiB | the file is held in memory; larger is `ErrLimitExceeded` |
-| `Limits.MaxDecodedBytes` | 1 GiB | the text decoded to UTF-8 and the bytes of `data:` images |
+| `Limits.MaxDecodedBytes` | 1 GiB | the text decoded to UTF-8, the HTML a Markdown document is rendered to, and the bytes of `data:` images |
 | `Limits.MaxTextBytes` | 256 MiB | core's text budget: block text, cells, markers, link targets, image IDs, `BlockCost` a block and `CellCost` a cell of a table (so a small table declaring a huge grid is cut by rows) |
 | `Extractor.MaxDepth` | 512 | tree depth |
 
-Every tag costs bounded work: end tags look at most 512 elements down the stack, formatting elements reopened are bounded, and inline styles are read up to 16 KiB. Extraction stops when the context is cancelled.
+Block quotes and lists in Markdown nest at most 100 deep (`md.MaxNest`); a marker past that is text. Scans in Markdown that find no end (code spans, comments) are not repeated. Every tag costs bounded work: end tags look at most 512 elements down the stack, formatting elements reopened are bounded, and inline styles are read up to 16 KiB. Extraction stops when the context is cancelled.
 
 ## Not read
 
-Stylesheets and scripts (not evaluated); `title` attributes (tooltips); `placeholder`; `alt` of `area`; `srcset`; `iframe srcdoc` (not extracted as an embedded document); CSS generated content; `<base href>` (addresses are as written); layout tables are tables. Markdown and plain text are not read yet.
+Stylesheets and scripts (not evaluated); `title` attributes (tooltips); `placeholder`; `alt` of `area`; `srcset`; `iframe srcdoc` (not extracted as an embedded document); CSS generated content; `<base href>` (addresses are as written); layout tables are tables. In Markdown: the GFM extensions other than tables, and front matter, as above.
 
 ## Licence
 

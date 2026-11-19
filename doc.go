@@ -1,5 +1,7 @@
-// Package gofasthtml extracts HTML into the shared go-fast document model,
-// gofastcore.Document. Markdown and plain text are to follow.
+// Package gofasthtml extracts HTML, Markdown and plain text into the shared
+// go-fast document model, gofastcore.Document. Markdown is parsed as
+// CommonMark (with GFM tables), rendered to HTML and read as a page is, so
+// its raw HTML gets the same checks; blocks are located in the Markdown.
 //
 // It uses the standard library and go-fast-core only, with an HTML5
 // tokenizer and tree builder of its own that recover from tag soup the way

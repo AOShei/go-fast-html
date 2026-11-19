@@ -17,15 +17,17 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 | `internal/dom` | Tree builder for tag soup: implied end tags, misnested formatting (simplified adoption agency), active formatting reconstruction, foster parenting, foreign content breakout, a nesting depth limit; per-node effective hidden state from inline style |
 | `internal/css` | Inline `style` declarations that matter: display, visibility, font-size, opacity, color/background, white-space, position offsets |
 | `internal/blocks` | Walk the tree and emit core blocks, with whitespace collapsing, spans, hidden ranges, tables, lists, budget |
-| `cmd/gofasthtml` | CLI printing JSON (run 2) |
+| `internal/md` | CommonMark parser rendering to HTML with a map back to Markdown offsets |
+| `text.go` | Plain text paragraphs |
+| `cmd/gofasthtml` | CLI printing JSON, Markdown or text |
 
 ## Phases
 
 1. **HTML (run 1)**: charset, entities, tokenizer, tree builder, mapping,
-   public API, tests, fuzz targets, README. Status: in progress.
+   public API, tests, fuzz targets, README. Status: done.
 2. **Markdown, plain text, CLI (run 2)**: CommonMark parser to the same
    blocks, plain text (paragraphs by blank lines), `cmd/gofasthtml`, and
-   anything left from phase 1.
+   anything left from phase 1. Status: done; open items below.
 
 ## Status
 
@@ -41,11 +43,17 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
       warnings, images, errors, budgets, worst cases, FuzzExtract with
       Validate, source hygiene, imports
 - [x] README, NOTICE
-- [ ] Unit tests for internal/blocks directly (covered through the root
-      package today)
-- [ ] Markdown (run 2)
-- [ ] Plain text (run 2)
-- [ ] CLI `cmd/gofasthtml` in the style of go-fast-ooxml's (run 2)
+- [x] Unit tests for internal/blocks (run 2)
+- [x] Markdown (run 2): `internal/md`, CommonMark 0.31 blocks and inlines,
+      GFM tables; rendered to HTML with a source map and read by the
+      HTML path. Tests, fuzz target, worst cases in all three formats.
+- [x] Plain text (run 2): `text.go`
+- [x] Format detection (`Detect`, `Extractor.Format`)
+- [x] CLI `cmd/gofasthtml` (run 2), with tests
+- [ ] Run the CommonMark spec examples (spec.txt) as a test; not
+      available offline, so only hand-picked spec cases are tested
+- [ ] GFM task lists, strikethrough, extended autolinks, footnotes;
+      front matter
 
 ## Open items from phase 1
 
