@@ -55,6 +55,24 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 - [ ] GFM task lists, strikethrough, extended autolinks, footnotes;
       front matter
 
+## Phase 3 (run 3)
+
+- [x] `aria-hidden` no longer a hidden reason (user decision 2026-11-20)
+- [x] Unshown attribute text (aria-label, aria-description,
+      aria-roledescription, aria-placeholder, title, placeholder, area
+      alt) as `note` blocks of type `attribute`, flagged invisible
+- [x] `KindThematicBreak` for `<hr>` and Markdown breaks; core pinned at
+      df335f0
+- [x] EPUB 2/3 (`epub.go`, `internal/epub`): zip with member limit and
+      local-header recovery, OPF metadata, chapters per spine item in
+      XHTML mode, nav/NCX outline, manifest images in a stored part,
+      other items as children, encryption.xml; command accepts .epub
+- [ ] Unit tests in `internal/epub` (covered through the root package)
+- [ ] EPUB: `media-overlay`, `page-list`/landmarks navigation, fixed
+      layout and `rendition:*` properties are not read
+- [ ] Core proposals: a note type for attribute text, a stored value for
+      manifest items (both are library-local strings today)
+
 ## Open items from phase 1
 
 - Layout tables (a whole page in table cells) are emitted as one table;

@@ -65,7 +65,7 @@ One part of kind `body`, numbered 1. Every block has `Loc.Offset` and `Loc.Lengt
 | `a href` | a link span, with `Options.Spans` |
 | `b`, `strong`, `i`, `em`, `u`, `s`, `del`, `code`, `kbd`, `sub`, `sup`, ... | style spans, with `Options.Spans` |
 | `br` | `\n` in the text |
-| `hr` | ends the block; core has no break block |
+| `hr` (and a Markdown thematic break, `---`, `***`, `___`) | `thematic_break`, no text, with the hidden reasons of the element; inside a table cell only a line break in the cell's text |
 | `select` | `note` of type `choices`, the options a line each, `Attrs["field"]` its name |
 | `textarea`, `input` with a value | `paragraph` with `Attrs["field"]` the control's name; a hidden input is flagged `invisible` |
 | `<!-- comment -->` | `note` of type `comment`, flagged `invisible`, after the block it stands in |

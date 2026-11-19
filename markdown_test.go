@@ -15,7 +15,8 @@ func TestMarkdown(t *testing.T) {
 		{"> quoted\n> > deeper", `quote1"quoted" quote2"deeper"`},
 		{"```python\n  x = 1\n```", "code\"  x = 1\""},
 		{"    indented\n    code", "code\"indented\\ncode\""},
-		{"a\n\n---\n\nb", `paragraph"a" paragraph"b"`},
+		{"a\n\n---\n\nb", `paragraph"a" thematic_break"" paragraph"b"`},
+		{"***\n___\n- - -", `thematic_break"" thematic_break"" thematic_break""`},
 		{"[link](http://x) and ![alt text](p.png)", `paragraph"link and" image"alt text"`},
 		{"`co*de*` \\*lit\\*", "paragraph\"co*de* *lit*\""},
 		{"a  \nb", `paragraph"a\nb"`},
@@ -28,6 +29,25 @@ func TestMarkdown(t *testing.T) {
 		if got := show(extractAs(t, "md", c.in, nil)); got != c.want {
 			t.Errorf("%q:\n got %s\nwant %s", c.in, got, c.want)
 		}
+	}
+}
+
+func TestThematicBreakRoundTrip(t *testing.T) {
+	doc := extractAs(t, "md", "One\n\n* * *\n\nTwo", nil)
+	md := doc.Markdown()
+	if !strings.Contains(md, "\n---\n") {
+		t.Fatalf("Markdown() = %q", md)
+	}
+	again := extractAs(t, "md", md, nil)
+	if show(again) != show(doc) {
+		t.Errorf("round trip: %s, want %s", show(again), show(doc))
+	}
+	b := doc.Parts[0].Blocks[1]
+	if b.Kind != gofastcore.KindThematicBreak || b.Loc.Offset != 5 || b.Loc.Length != 5 {
+		t.Errorf("break %+v", b)
+	}
+	if txt := doc.Text(); strings.Contains(txt, "---") {
+		t.Errorf("Text() = %q", txt)
 	}
 }
 

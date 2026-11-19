@@ -174,7 +174,12 @@ func (w *walker) element(n *dom.Node) {
 		w.buf.lineBreak()
 		return
 	case "hr":
+		// A thematic break; in a table cell, only a line break.
 		w.hardFlush()
+		if w.cell == 0 {
+			w.emit(gofastcore.Block{Kind: gofastcore.KindThematicBreak, Hidden: n.Hidden | w.extra,
+				Loc: w.loc(n.Start, n.End, anchorOf(n))})
+		}
 		return
 	case "img":
 		w.image(n)
