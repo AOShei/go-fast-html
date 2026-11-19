@@ -40,7 +40,7 @@ func TestWorstCase(t *testing.T) {
 		"distinct attrs":    "<p " + distinctAttrs(n) + ">x",
 		"reopened style":    `<b style="` + strings.Repeat("color:red;", 1600) + `">` + strings.Repeat("<p>x</p>", n),
 		"breaks with spans": "<p>" + strings.Repeat("<b>x</b><br>", n),
-		"deep in cell":"<table><tr><td>" + strings.Repeat("<div>", n) + "x",
+		"deep in cell":      "<table><tr><td>" + strings.Repeat("<div>", n) + "x",
 		"deep in list":      "<ul><li>" + strings.Repeat("<span>", n) + "x",
 		"style":             strings.Repeat(`<span style="color:#fff;background:rgb(1,2,3);font-size:1%">`, 2000) + "x",
 		"select":            "<select>" + strings.Repeat("<option>x", n),
