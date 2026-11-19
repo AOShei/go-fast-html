@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/AOShei/go-fast-html/internal/css"
 	"github.com/AOShei/go-fast-html/internal/lexer"
 )
 
@@ -60,6 +61,7 @@ type builder struct {
 	seenHTML bool
 	seenHead bool
 	seenBody bool
+	styles   map[*lexer.Attr]*css.Style
 }
 
 // Parse builds the tree of src, which must be UTF-8. It returns ctx's
@@ -205,7 +207,7 @@ func (b *builder) insert(t *lexer.Token, ns NS, void bool) *Node {
 }
 
 func (b *builder) insertAt(t *lexer.Token, ns NS, void bool, parent, ref *Node, pst *state, attach bool) *Node {
-	st := pst.child(t.Name, ns, t.Attrs)
+	st := pst.child(t.Name, ns, t.Attrs, b.style(t.Attrs))
 	n := &Node{Type: ElementNode, Name: t.Name, NS: ns, Attrs: t.Attrs, Start: t.Start, End: t.End, Hidden: st.hidden(), WS: st.ws}
 	box := parent
 	if attach {
@@ -228,6 +230,28 @@ func (b *builder) insertAt(t *lexer.Token, ns NS, void bool, parent, ref *Node, 
 	n.open = true
 	b.stack = append(b.stack, entry{node: n, box: box, st: st})
 	return n
+}
+
+// style parses the style attribute among attrs. A formatting element
+// reopened many times shares its attributes with the original, so the
+// parse is kept for it.
+func (b *builder) style(attrs []lexer.Attr) *css.Style {
+	for i := range attrs {
+		if attrs[i].Name != "style" {
+			continue
+		}
+		key := &attrs[i]
+		if st, ok := b.styles[key]; ok {
+			return st
+		}
+		st := css.Parse(attrs[i].Value)
+		if b.styles == nil {
+			b.styles = map[*lexer.Attr]*css.Style{}
+		}
+		b.styles[key] = &st
+		return &st
+	}
+	return nil
 }
 
 // popTo pops the open elements from index i up.

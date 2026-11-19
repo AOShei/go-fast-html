@@ -73,8 +73,9 @@ func (s *state) textHidden() gofastcore.Hidden {
 	return h
 }
 
-// child returns the state of an element inside one in state s.
-func (s state) child(name string, ns NS, attrs []lexer.Attr) state {
+// child returns the state of an element inside one in state s. style is
+// the element's parsed style attribute, nil if it has none.
+func (s state) child(name string, ns NS, attrs []lexer.Attr, style *css.Style) state {
 	c := s
 	c.closedDetails = false
 	if s.closedDetails && name != "summary" {
@@ -128,8 +129,8 @@ func (s state) child(name string, ns NS, attrs []lexer.Attr) state {
 	if v, ok := attr("aria-hidden"); ok && strings.EqualFold(strings.TrimSpace(v), "true") {
 		c.sticky |= gofastcore.HiddenInvisible
 	}
-	if v, ok := attr("style"); ok {
-		st := css.Parse(v)
+	if style != nil {
+		st := style
 		switch st.Display {
 		case "":
 		case "none":

@@ -38,7 +38,9 @@ func TestWorstCase(t *testing.T) {
 		"entities":          strings.Repeat("&NotNestedGreaterGreater;", n),
 		"attributes":        "<p " + strings.Repeat("a=b ", n) + ">x",
 		"distinct attrs":    "<p " + distinctAttrs(n) + ">x",
-		"deep in cell":      "<table><tr><td>" + strings.Repeat("<div>", n) + "x",
+		"reopened style":    `<b style="` + strings.Repeat("color:red;", 1600) + `">` + strings.Repeat("<p>x</p>", n),
+		"breaks with spans": "<p>" + strings.Repeat("<b>x</b><br>", n),
+		"deep in cell":"<table><tr><td>" + strings.Repeat("<div>", n) + "x",
 		"deep in list":      "<ul><li>" + strings.Repeat("<span>", n) + "x",
 		"style":             strings.Repeat(`<span style="color:#fff;background:rgb(1,2,3);font-size:1%">`, 2000) + "x",
 		"select":            "<select>" + strings.Repeat("<option>x", n),
@@ -50,7 +52,7 @@ func TestWorstCase(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			start := time.Now()
 			doc, err := Extract(context.Background(), strings.NewReader(src), int64(len(src)),
-				&gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 8 << 20}})
+				&gofastcore.Options{Spans: true, Limits: gofastcore.Limits{MaxTextBytes: 8 << 20}})
 			if err != nil {
 				t.Fatal(err)
 			}

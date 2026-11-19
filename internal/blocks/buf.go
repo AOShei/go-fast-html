@@ -105,8 +105,9 @@ func (b *buf) clip() {
 	for i := len(b.runs) - 1; i >= 0 && b.runs[i].end > n; i-- {
 		b.runs[i].end = n
 	}
-	for i := range b.spans {
-		b.spans[i].End = min(b.spans[i].End, n)
+	// Spans are added as their elements end, so in order of End.
+	for i := len(b.spans) - 1; i >= 0 && b.spans[i].End > n; i-- {
+		b.spans[i].End = n
 	}
 }
 
