@@ -54,8 +54,8 @@ func TestBufWholeHidden(t *testing.T) {
 
 func TestVerbatim(t *testing.T) {
 	b := newBuf()
-	b.add([]byte(" ﬁ\t\x00x \n"), dom.Pre, 0, true)
-	if got, _, _ := b.verbatimText(); got != " ﬁ\tx \n" {
+	b.add([]byte(" \xEF\xAC\x81\t\x00x \n"), dom.Pre, 0, true)
+	if got, _, _ := b.verbatimText(); got != " \xEF\xAC\x81\tx \n" {
 		t.Errorf("%q", got)
 	}
 }
@@ -175,7 +175,7 @@ func TestHelpers(t *testing.T) {
 	if cleanRef(" a\x00b\n") != "ab" {
 		t.Error("cleanRef")
 	}
-	if cleanProse(" a\n  bﬁ ", true) != "a bfi" {
+	if cleanProse(" a\n  b\xEF\xAC\x81 ", true) != "a bfi" {
 		t.Error("cleanProse")
 	}
 	d, _ := dom.Parse(context.Background(), []byte(`<pre class="x lang-Go"><code class="language-rust">`), dom.Options{})
