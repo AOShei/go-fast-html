@@ -132,7 +132,8 @@ func (r *renderer) block(b *block, tight bool) {
 			r.o.B = append(r.o.B, '"')
 		}
 		r.o.B = append(r.o.B, '>')
-		r.esc(b.content, false)
+		// The last line ending ends the line, and is not code.
+		r.esc(strings.TrimSuffix(b.content, "\n"), false)
 		r.o.B = append(r.o.B, "</code></pre>"...)
 		r.span(h, b.start, b.end)
 	case kHTML:

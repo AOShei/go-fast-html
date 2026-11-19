@@ -13,12 +13,20 @@ import (
 
 func extract(t testing.TB, src string, opts *gofastcore.Options) *gofastcore.Document {
 	t.Helper()
-	doc, err := Extract(context.Background(), strings.NewReader(src), int64(len(src)), opts)
+	return extractAs(t, "html", src, opts)
+}
+
+func extractAs(t testing.TB, format, src string, opts *gofastcore.Options) *gofastcore.Document {
+	t.Helper()
+	doc, err := (&Extractor{Format: format}).Extract(context.Background(), strings.NewReader(src), int64(len(src)), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := doc.Validate(); err != nil {
 		t.Fatalf("Validate: %v\n%s", err, src)
+	}
+	if doc.Source.Format != format {
+		t.Fatalf("format %q", doc.Source.Format)
 	}
 	return doc
 }

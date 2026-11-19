@@ -39,11 +39,13 @@ func FuzzExtract(f *testing.F) {
 				t.Fatalf("%d bytes took %v", len(b), d)
 			}
 		}()
-		for _, opts := range []*gofastcore.Options{
+		for i, opts := range []*gofastcore.Options{
 			{Spans: true, Images: gofastcore.ImagesData},
 			{Limits: gofastcore.Limits{MaxTextBytes: 2048, MaxDecodedBytes: 4096}},
+			{Spans: true},
 		} {
-			doc, err := (&Extractor{MaxDepth: 24}).Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+			format := []string{"html", "md", "txt"}[(i+len(b))%3]
+			doc, err := (&Extractor{Format: format, MaxDepth: 24}).Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
 			if err != nil {
 				t.Fatal(err)
 			}

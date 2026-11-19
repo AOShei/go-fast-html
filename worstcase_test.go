@@ -48,20 +48,58 @@ func TestWorstCase(t *testing.T) {
 		"nested blockquote": strings.Repeat("<blockquote>", n) + "x",
 		"nested lists":      strings.Repeat("<ul><li>", n) + "x",
 	}
+	// Markdown built to be costly; every case is read in every format.
+	for k, v := range map[string]string{
+		"md quotes":     strings.Repeat(">", n) + " x\n" + strings.Repeat(strings.Repeat("> ", 90)+"y\n", 2000),
+		"md lists":      strings.Repeat(strings.Repeat("  ", 50)+"- x\n", 5000),
+		"md emphasis":   strings.Repeat("*a _b ", n),
+		"md closers":    strings.Repeat("a* ", n),
+		"md brackets":   strings.Repeat("[", n) + strings.Repeat("](x)", n),
+		"md images":     strings.Repeat("![", n) + "x",
+		"md ticks":      backticks(3000),
+		"md refdefs":    strings.Repeat("[a]: /b\n", n) + strings.Repeat("[a] ", n),
+		"md links":      strings.Repeat("[a](b \"", n),
+		"md html":       strings.Repeat("<a b='c' ", n),
+		"md comments":   strings.Repeat("<!-- ", n),
+		"md long para":  strings.Repeat("a\n", 4*n),
+		"md long code":  "```\n" + strings.Repeat("a\n", 4*n),
+		"md table":      "|a|b|\n|-|-|\n" + strings.Repeat("|x|y|\n", n),
+		"md entities":   strings.Repeat("&#x10FFFF;&amp;&bogus;", n),
+		"md fences":     strings.Repeat("```\n", n),
+		"md setext":     strings.Repeat("a\n=\n", n),
+		"txt long line": strings.Repeat("word ", n*4),
+		"txt blanks":    strings.Repeat("\n \n\f", n),
+	} {
+		cases[k] = v
+	}
 	for name, src := range cases {
-		t.Run(name, func(t *testing.T) {
-			start := time.Now()
-			doc, err := Extract(context.Background(), strings.NewReader(src), int64(len(src)),
-				&gofastcore.Options{Spans: true, Limits: gofastcore.Limits{MaxTextBytes: 8 << 20}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := doc.Validate(); err != nil {
-				t.Fatal(err)
-			}
-			if d := time.Since(start); d > 5*time.Second {
-				t.Errorf("%d bytes took %v", len(src), d)
-			}
-		})
+		for _, format := range []string{"html", "md", "txt"} {
+			t.Run(name+"/"+format, func(t *testing.T) {
+				worstCase(t, format, src)
+			})
+		}
+	}
+}
+
+func backticks(n int) string {
+	var sb strings.Builder
+	for i := 1; i <= n; i++ {
+		sb.WriteString(strings.Repeat("`", i%200+1) + "a")
+	}
+	return sb.String()
+}
+
+func worstCase(t *testing.T, format, src string) {
+	start := time.Now()
+	doc, err := (&Extractor{Format: format}).Extract(context.Background(), strings.NewReader(src), int64(len(src)),
+		&gofastcore.Options{Spans: true, Limits: gofastcore.Limits{MaxTextBytes: 8 << 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("%d bytes took %v", len(src), d)
 	}
 }

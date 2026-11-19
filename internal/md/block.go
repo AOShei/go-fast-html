@@ -58,8 +58,9 @@ type block struct {
 	tight                 bool
 	markerOffset, padding int
 
-	content            string
-	lines              []hline // of an HTML block
+	cb                 strings.Builder // the lines as they are added
+	content            string          // and once the block is closed
+	lines              []hline         // of an HTML block
 	level              int
 	fenced             bool
 	fence              byte
@@ -394,7 +395,8 @@ func (p *parser) addLine() {
 	if t.kind == kHTML {
 		t.lines = append(t.lines, hline{text, p.lineStart + min(p.offset, len(p.line))})
 	}
-	t.content += sb.String() + "\n"
+	t.cb.WriteString(sb.String())
+	t.cb.WriteByte('\n')
 	if !p.blank || t.kind == kHTML || t.kind == kCode && t.fenced {
 		p.touch(t, p.lineStart+len(p.line))
 	}
@@ -406,6 +408,9 @@ func (p *parser) finalize(b *block) {
 		return
 	}
 	b.open = false
+	if b.kind != kHeading {
+		b.content = b.cb.String()
+	}
 	switch b.kind {
 	case kPara:
 		b.content = p.takeRefdefs(b.content)

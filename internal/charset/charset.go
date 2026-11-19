@@ -63,15 +63,35 @@ type Result struct {
 	Unsupported bool
 }
 
-// Sniff decides the encoding of b.
-func Sniff(b []byte) Result {
+func bom(b []byte) (Result, bool) {
 	switch {
 	case bytes.HasPrefix(b, []byte{0xEF, 0xBB, 0xBF}):
-		return Result{Enc: UTF8, From: FromBOM, BOM: 3}
+		return Result{Enc: UTF8, From: FromBOM, BOM: 3}, true
 	case bytes.HasPrefix(b, []byte{0xFE, 0xFF}):
-		return Result{Enc: UTF16BE, From: FromBOM, BOM: 2}
+		return Result{Enc: UTF16BE, From: FromBOM, BOM: 2}, true
 	case bytes.HasPrefix(b, []byte{0xFF, 0xFE}):
-		return Result{Enc: UTF16LE, From: FromBOM, BOM: 2}
+		return Result{Enc: UTF16LE, From: FromBOM, BOM: 2}, true
+	}
+	return Result{}, false
+}
+
+// SniffText decides the encoding of text that has no way to declare one
+// (Markdown, plain text): a byte order mark, else UTF-8 if b is valid
+// UTF-8, else windows-1252.
+func SniffText(b []byte) Result {
+	if r, ok := bom(b); ok {
+		return r
+	}
+	if utf8.Valid(b) {
+		return Result{Enc: UTF8, From: FromDetected}
+	}
+	return Result{Enc: Windows1252, From: FromDetected}
+}
+
+// Sniff decides the encoding of b.
+func Sniff(b []byte) Result {
+	if r, ok := bom(b); ok {
+		return r
 	}
 	if label, ok := prescan(b[:min(len(b), 1024)]); ok {
 		r := Result{From: FromMeta, Declared: label}

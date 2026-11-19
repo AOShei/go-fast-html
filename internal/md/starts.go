@@ -183,7 +183,9 @@ func startSetext(p *parser, c *block) int {
 		return 0
 	}
 	p.closeUnmatched()
-	c.content = p.takeRefdefs(c.content)
+	c.content = p.takeRefdefs(c.cb.String())
+	c.cb.Reset()
+	c.cb.WriteString(c.content)
 	if strings.Trim(c.content, " \t\n") == "" {
 		return 0
 	}
