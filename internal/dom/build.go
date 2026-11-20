@@ -29,6 +29,10 @@ type Options struct {
 	MaxStack int
 	// XHTML reads self-closing tags as empty elements (EPUB content).
 	XHTML bool
+	// NavDoc reads an EPUB navigation document: the hidden attribute on
+	// a nav or ol element, which EPUB 3 provides to keep landmarks, the
+	// page list or deeper levels out of view, is not a reason there.
+	NavDoc bool
 }
 
 // Doc is a parsed document.
@@ -65,6 +69,7 @@ type builder struct {
 	seenBody bool
 	styles   map[*lexer.Attr]*css.Style
 	xhtml    bool
+	navDoc   bool
 }
 
 // Parse builds the tree of src, which must be UTF-8. It returns ctx's
@@ -77,6 +82,7 @@ func Parse(ctx context.Context, src []byte, opt Options) (*Doc, error) {
 		maxStack: opt.MaxStack,
 		clones:   len(src)/4 + 4096,
 		xhtml:    opt.XHTML,
+		navDoc:   opt.NavDoc,
 	}
 	if b.maxDepth <= 0 {
 		b.maxDepth = DefaultMaxDepth
@@ -216,7 +222,17 @@ func (b *builder) insert(t *lexer.Token, ns NS, void bool) *Node {
 }
 
 func (b *builder) insertAt(t *lexer.Token, ns NS, void bool, parent, ref *Node, pst *state, attach bool) *Node {
-	st := pst.child(t.Name, ns, t.Attrs, b.style(t.Attrs))
+	attrs := t.Attrs
+	if b.navDoc && ns == HTML && (t.Name == "nav" || t.Name == "ol") {
+		// The hidden attribute of EPUB navigation is not a reason.
+		attrs = make([]lexer.Attr, 0, len(t.Attrs))
+		for _, a := range t.Attrs {
+			if a.Name != "hidden" {
+				attrs = append(attrs, a)
+			}
+		}
+	}
+	st := pst.child(t.Name, ns, attrs, b.style(t.Attrs))
 	n := &Node{Type: ElementNode, Name: t.Name, NS: ns, Attrs: t.Attrs, Start: t.Start, End: t.End, Hidden: st.hidden(), WS: st.ws}
 	box := parent
 	if attach {

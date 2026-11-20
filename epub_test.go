@@ -198,6 +198,30 @@ func TestEPUB(t *testing.T) {
 	}
 }
 
+// The navigation document in the spine keeps its landmarks and page list
+// out of view with the hidden attribute, as EPUB 3 provides: routine
+// structure, not hiding. Other hidden content in it is still flagged.
+func TestEPUBNavInSpine(t *testing.T) {
+	opf := strings.Replace(opf3, `<spine>`, `<spine><itemref idref="nav"/>`, 1)
+	navDoc := strings.Replace(nav, `</body>`, `<nav epub:type="landmarks" hidden=""><ol><li><a epub:type="bodymatter" href="text/ch1.xhtml">Start</a></li></ol></nav>`+
+		`<nav epub:type="page-list" hidden="hidden"><ol><li><a href="text/ch1.xhtml#p1">1</a></li></ol></nav><p hidden="">Secret.</p></body>`, 1)
+	b := buildEPUB(t, "META-INF/container.xml", container, "OEBPS/content.opf", opf, "OEBPS/nav.xhtml", navDoc,
+		"OEBPS/text/ch1.xhtml", `<html><body><p>One.</p></body></html>`)
+	doc := extractEPUB(t, b, nil)
+	flagged := 0
+	for _, blk := range doc.Parts[0].Blocks {
+		if blk.Hidden != 0 {
+			flagged++
+			if blk.Text != "Secret." {
+				t.Errorf("%q flagged %s", blk.Text, blk.Hidden)
+			}
+		}
+	}
+	if flagged != 1 {
+		t.Errorf("%d flagged", flagged)
+	}
+}
+
 func TestEPUB2(t *testing.T) {
 	opf := `<package version="2.0" unique-identifier="id" xmlns="http://www.idpf.org/2007/opf">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Old</dc:title><meta name="cover" content="c"/></metadata>

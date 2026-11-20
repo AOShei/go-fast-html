@@ -229,7 +229,8 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 		return nil
 	}
 	pc := pageConfig{opts: opts, text: text, decode: decode,
-		xhtml: it.MediaType != "text/html",
+		xhtml:  it.MediaType != "text/html",
+		navDoc: hasProperty(it.Properties, "nav"),
 		image: func(src string) (blocks.ImageRef, bool) {
 			p, ok := epub.Resolve(it.Path, src)
 			if !ok || !a.Has(p) {

@@ -301,6 +301,8 @@ type pageConfig struct {
 	decode *gofastcore.DecodeBudget
 	// xhtml reads self-closing tags as XML does (EPUB content).
 	xhtml bool
+	// navDoc: the page is an EPUB navigation document (dom.Options).
+	navDoc bool
 	// image resolves an image address, as for EPUB, where images are in
 	// the archive.
 	image    func(src string) (blocks.ImageRef, bool)
@@ -366,7 +368,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		source = func(i int) int64 { return m.Source(h.Source(i)) }
 	}
 
-	tree, err := dom.Parse(ctx, page, dom.Options{MaxDepth: e.MaxDepth, XHTML: pc.xhtml})
+	tree, err := dom.Parse(ctx, page, dom.Options{MaxDepth: e.MaxDepth, XHTML: pc.xhtml, NavDoc: pc.navDoc})
 	if err != nil {
 		return nil, err
 	}
