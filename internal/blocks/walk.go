@@ -134,6 +134,29 @@ func (w *walker) element(n *dom.Node) {
 	w.activeAttrs(n)
 	w.attrNotes(n)
 	if n.NS != dom.HTML {
+		if n.NS == dom.SVG {
+			switch n.Name {
+			case "script":
+				w.srcRef(n, "href")
+				w.srcRef(n, "xlink:href")
+				w.script(n)
+				return
+			case "style":
+				w.res.Stylesheets++
+				w.storedCode(n, "css", StoredStylesheet)
+				return
+			case "image":
+				w.image(n)
+				return
+			case "text":
+				// Each text element is placed on its own: keep its words
+				// apart from its neighbours'.
+				w.buf.pending = true
+				w.inline(n, 0)
+				w.buf.pending = true
+				return
+			}
+		}
 		// SVG and MathML: their text is shown where they stand.
 		w.inline(n, 0)
 		return

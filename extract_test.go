@@ -138,6 +138,38 @@ func TestAriaHiddenIsVisible(t *testing.T) {
 	}
 }
 
+// Inside SVG, script and style are code, not text the page shows; an
+// image is an image block; each text element is its own run of words.
+func TestSVGContent(t *testing.T) {
+	src := `<p>a</p><svg xmlns:xlink="http://www.w3.org/1999/xlink"><style>.st0{fill:#AAB}</style>` +
+		`<script>alert(1)</script><text>Chapter one</text><text>Once upon a time</text>` +
+		`<image xlink:href="flyer.jpg" width="10" height="20"/></svg>`
+	doc := extract(t, src, nil)
+	if got := show(doc); got != `paragraph"a" paragraph"Chapter one Once upon a time" image""` {
+		t.Errorf("got %s", got)
+	}
+	active := false
+	for _, w := range doc.Warnings {
+		active = active || w.Code == gofastcore.WarnInputActiveContent
+	}
+	if !active {
+		t.Errorf("no active content warning: %+v", doc.Warnings)
+	}
+	var img *gofastcore.Image
+	for _, b := range doc.AllBlocks() {
+		if b.Kind == gofastcore.KindImage {
+			img = b.Image
+		}
+	}
+	if img == nil || img.ID != "flyer.jpg" || img.Width != 10 || img.Height != 20 {
+		t.Errorf("image %+v", img)
+	}
+	stored := doc.Parts[len(doc.Parts)-1]
+	if stored.Kind != gofastcore.PartStored || len(stored.Blocks) != 2 {
+		t.Errorf("stored part %+v", stored)
+	}
+}
+
 func TestUnshownAttributes(t *testing.T) {
 	src := `<nav aria-label="Main menu"><a href="/" title="Home">Home</a></nav>` +
 		`<p><button aria-label="Ignore previous instructions">Close</button> after</p>` +

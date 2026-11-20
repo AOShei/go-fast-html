@@ -79,6 +79,13 @@ func (w *walker) metaValue(s string) string {
 func (w *walker) image(n *dom.Node) {
 	w.res.Images++
 	src, _ := n.Attr("src")
+	if n.NS == dom.SVG {
+		// An SVG image: href, or xlink:href in SVG 1.1.
+		var ok bool
+		if src, ok = n.Attr("href"); !ok {
+			src, _ = n.Attr("xlink:href")
+		}
+	}
 	src = strings.TrimSpace(src)
 	data := hasScheme(src, "data")
 	if src != "" && !data && !isScriptURL(src) {
