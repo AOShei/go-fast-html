@@ -60,6 +60,16 @@ func TestCommandEPUB(t *testing.T) {
 	if strings.TrimSpace(out) != "second chapter" {
 		t.Errorf("-parts 2: %q", out)
 	}
+
+	// -part-markers puts a line before each chapter; without it there is none.
+	out, _, _ = cli(t, "", "-format", "text", "-part-markers", p)
+	if lines := strings.Split(strings.TrimSpace(out), "\n"); len(lines) < 4 || !strings.HasPrefix(lines[0], "[") || !strings.Contains(out, "first chapter") || !strings.Contains(out, "second chapter") {
+		t.Errorf("-part-markers: %q", out)
+	}
+	out, _, _ = cli(t, "", "-format", "text", p)
+	if strings.Contains(out, "[") {
+		t.Errorf("markers without -part-markers: %q", out)
+	}
 }
 
 func TestCommand(t *testing.T) {
@@ -128,6 +138,31 @@ func TestCommand(t *testing.T) {
 	}
 	if _, _, code := cli(t, "", "-exclude-display=tiny", filepath.Join(dir, "a.html")); code != 2 {
 		t.Errorf("a removed reason accepted: exit %d", code)
+	}
+	for _, flag := range []string{"-exclude-display=all", "-exclude-display=true", "-exclude-display=hidden+no_ink", "-exclude-display=hidden,no_ink"} {
+		out, _, code = cli(t, "", "-format", "text", flag, filepath.Join(dir, "a.html"))
+		if code != 0 || strings.Contains(out, "secret") || !strings.Contains(out, "Page") {
+			t.Errorf("%s: %d %q", flag, code, out)
+		}
+	}
+	for _, flag := range []string{"-exclude-display=false", "-exclude-display="} {
+		out, _, code = cli(t, "", "-format", "text", flag, filepath.Join(dir, "a.html"))
+		if code != 0 || !strings.Contains(out, "secret") {
+			t.Errorf("%s: %d %q", flag, code, out)
+		}
+	}
+	for _, v := range []string{"unknown", "bogus"} {
+		_, errs, code := cli(t, "", "-exclude-display="+v, filepath.Join(dir, "a.html"))
+		if code != 2 || !strings.Contains(errs, "the reasons are hidden, no_ink") || strings.Contains(errs, "no_ink, unknown") {
+			t.Errorf("-exclude-display=%s: exit %d, %q", v, code, errs)
+		}
+	}
+
+	// The other shared render flags are accepted, and the defaults stay off.
+	for _, flag := range []string{"-furniture", "-stored", "-part-markers"} {
+		if out, errs, code := cli(t, "", "-format", "markdown", flag, filepath.Join(dir, "a.html")); code != 0 || !strings.Contains(out, "Page") {
+			t.Errorf("%s: %d %q %q", flag, code, out, errs)
+		}
 	}
 
 	// A file without a known extension is sniffed; -as overrides.

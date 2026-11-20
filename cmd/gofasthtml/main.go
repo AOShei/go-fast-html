@@ -75,7 +75,7 @@ func (h *displayFlag) Set(v string) error {
 		return err
 	}
 	if !reasons.Valid() || reasons == 0 || reasons&gofastcore.DisplayUnknown != 0 {
-		return fmt.Errorf("unknown reason in %q; the reasons are %s", v, strings.ReplaceAll((gofastcore.DisplayAny&^gofastcore.DisplayUnknown).String(), "+", ", "))
+		return fmt.Errorf("unknown reason in %q; the reasons are %s", v, strings.ReplaceAll((gofastcore.DisplayHidden|gofastcore.DisplayNoInk).String(), "+", ", "))
 	}
 	h.reasons = reasons
 	return nil
@@ -99,10 +99,14 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		maxBytes = flags.Int64("max-decoded-bytes", 0, "bytes decoded from a file (0: the default, 1 GiB; -1: no limit)")
 		maxText  = flags.Int64("max-text-bytes", 0, "bytes of text a document may hold (0: the default, 256 MiB; -1: no limit)")
 		quiet    = flags.Bool("quiet", false, "say nothing about files that were read; failures are still reported")
-		version  = flags.Bool("version", false, "print the version and exit")
+		// The render flags shared by every go-fast command (COMMAND_FLAGS.md).
+		furniture   = flags.Bool("furniture", false, "in Markdown and text, include running headers and footers")
+		stored      = flags.Bool("stored", false, "in Markdown and text, include the stored part (data the file keeps but shows nowhere)")
+		partMarkers = flags.Bool("part-markers", false, "in Markdown and text, put a line before each part saying which part it is")
+		version     = flags.Bool("version", false, "print the version and exit")
 	)
 	var exclude displayFlag
-	flags.Var(&exclude, "exclude-display", "in Markdown and text, leave out text the file declares not displayed: all of it, or with =reasons only text with those reasons, hidden or no_ink (JSON always has everything, with its reasons)")
+	flags.Var(&exclude, "exclude-display", "in Markdown and text, leave out what the file declares not displayed: all of it, or with =reasons only those reasons (hidden, no_ink); JSON always has everything")
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "usage: gofasthtml [flags] file-or-directory...")
 		fmt.Fprintln(stderr, "Extracts HTML, Markdown, plain text and EPUB. A directory stands for the files of those kinds in it and below it; - is standard input.")
@@ -225,7 +229,14 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	w := bufio.NewWriter(out)
 	defer w.Flush()
-	render := &gofastcore.RenderOptions{ExcludeDisplay: exclude.reasons}
+	// The same options render every document this command prints, an
+	// EPUB's included.
+	render := &gofastcore.RenderOptions{
+		Furniture:      *furniture,
+		Stored:         *stored,
+		PartMarkers:    *partMarkers,
+		ExcludeDisplay: exclude.reasons,
+	}
 
 	written := 0
 	for _, path := range inputs {
