@@ -135,7 +135,7 @@ func (w *walker) image(n *dom.Node) {
 		}
 	}
 	w.later(gofastcore.Block{Kind: gofastcore.KindImage, Text: cleanProse(alt, true), Image: img,
-		Hidden: n.Hidden | w.extra, Loc: w.loc(n.Start, n.End, anchorOf(n))})
+		Display: n.Display, Loc: w.loc(n.Start, n.End, anchorOf(n))})
 }
 
 // ImageRef is an image a page refers to that is inside the container the

@@ -18,7 +18,7 @@ type tableRow struct {
 type placed struct {
 	row, col, rs, cs int
 	text             string
-	hidden           gofastcore.Hidden
+	hidden           gofastcore.Display // declared display reasons
 	href             string
 }
 
@@ -138,7 +138,7 @@ func spanAttr(n *dom.Node, name string, lo, hi int) int {
 }
 
 // cellText reads a cell's text: block boundaries in it are line breaks.
-func (w *walker) cellText(td *dom.Node) (string, gofastcore.Hidden, string) {
+func (w *walker) cellText(td *dom.Node) (string, gofastcore.Display, string) {
 	saved := w.buf
 	w.buf = newBuf()
 	w.cell++
@@ -177,7 +177,7 @@ func (w *walker) emitTable(n *dom.Node, rows []tableRow, cells []placed, width i
 	for t.HeaderRows < fit && headerRow(rows[t.HeaderRows]) {
 		t.HeaderRows++
 	}
-	whole, any, seen := gofastcore.HiddenAny, n.Hidden, false
+	whole, any, seen := gofastcore.DisplayAny, n.Display, false
 	for _, p := range cells {
 		if p.row >= fit || p.text == "" {
 			continue
@@ -187,7 +187,7 @@ func (w *walker) emitTable(n *dom.Node, rows []tableRow, cells []placed, width i
 		seen = true
 	}
 	if !seen {
-		whole = n.Hidden
+		whole = n.Display
 	}
 	for _, p := range cells {
 		if p.row >= fit {
@@ -202,10 +202,10 @@ func (w *walker) emitTable(n *dom.Node, rows []tableRow, cells []placed, width i
 			t.Cells = append(t.Cells, gofastcore.CellDetail{Row: p.row, Col: p.col, Href: p.href})
 		}
 		if part := p.hidden &^ whole; part != 0 && p.text != "" {
-			t.Hidden = append(t.Hidden, gofastcore.HiddenCells{Row: p.row, Col: p.col, RowSpan: rs, ColSpan: p.cs, Hidden: part})
+			t.Display = append(t.Display, gofastcore.DisplayCells{Row: p.row, Col: p.col, RowSpan: rs, ColSpan: p.cs, Display: part})
 		}
 	}
-	w.res.Blocks = append(w.res.Blocks, gofastcore.Block{Kind: gofastcore.KindTable, Table: t, Hidden: any,
+	w.res.Blocks = append(w.res.Blocks, gofastcore.Block{Kind: gofastcore.KindTable, Table: t, Display: any,
 		Loc: w.loc(n.Start, n.End, anchorOf(n))})
 }
 

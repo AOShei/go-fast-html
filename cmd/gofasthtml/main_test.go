@@ -111,14 +111,23 @@ func TestCommand(t *testing.T) {
 	if strings.Contains(out, "sniffed") || strings.Contains(out, "skip.bin") {
 		t.Errorf("unexpected file read:\n%s", out)
 	}
-	if !strings.Contains(errs, "text.hidden") {
+	if strings.Contains(errs, "text.hidden") {
 		t.Errorf("stderr %q", errs)
 	}
 
-	// Hidden text left out of rendered text on request.
-	out, _, _ = cli(t, "", "-format", "text", "-exclude-hidden", filepath.Join(dir, "a.html"))
-	if strings.Contains(out, "secret") || !strings.Contains(out, "Page") {
-		t.Errorf("exclude-hidden: %q", out)
+	// Text declared not displayed left out of rendered text on request.
+	for _, flag := range []string{"-exclude-display", "-exclude-display=hidden"} {
+		out, _, _ = cli(t, "", "-format", "text", flag, filepath.Join(dir, "a.html"))
+		if strings.Contains(out, "secret") || !strings.Contains(out, "Page") {
+			t.Errorf("%s: %q", flag, out)
+		}
+	}
+	out, _, _ = cli(t, "", "-format", "text", "-exclude-display=no_ink", filepath.Join(dir, "a.html"))
+	if !strings.Contains(out, "secret") {
+		t.Errorf("exclude-display=no_ink: %q", out)
+	}
+	if _, _, code := cli(t, "", "-exclude-display=tiny", filepath.Join(dir, "a.html")); code != 2 {
+		t.Errorf("a removed reason accepted: exit %d", code)
 	}
 
 	// A file without a known extension is sniffed; -as overrides.

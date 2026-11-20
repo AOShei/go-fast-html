@@ -142,7 +142,7 @@ func TestEPUB(t *testing.T) {
 		t.Errorf("part 1 %+v", p1)
 	}
 	got := show(&gofastcore.Document{Parts: []gofastcore.Part{p1}})
-	if !strings.Contains(got, `heading1"Chapter One" paragraph"First para." image"A picture" paragraph{invisible}"Hidden note."`) {
+	if !strings.Contains(got, `heading1"Chapter One" paragraph"First para." image"A picture" paragraph{hidden}"Hidden note."`) {
 		t.Errorf("chapter 1: %s", got)
 	}
 	for _, blk := range p1.Blocks {
@@ -162,7 +162,7 @@ func TestEPUB(t *testing.T) {
 	}
 	stored := doc.Parts[3]
 	if stored.Kind != gofastcore.PartStored || len(stored.Blocks) != 1 || stored.Blocks[0].Image.ID != "OEBPS/img/cover.jpg" ||
-		stored.Blocks[0].Text != "cover" || stored.Hidden != 0 || stored.Blocks[0].Hidden != 0 {
+		stored.Blocks[0].Text != "cover" || stored.Display != 0 || stored.Blocks[0].Display != 0 {
 		t.Errorf("stored %+v", stored)
 	}
 	if strings.Join(children, ",") != "extra.xhtml,f.otf" || len(doc.Children) != 2 {
@@ -179,10 +179,6 @@ func TestEPUB(t *testing.T) {
 			t.Errorf("archive members counted as external: %+v", w)
 		}
 	}
-	// A stylesheet is present, so invisible is not claimed.
-	if doc.HiddenChecked != gofastcore.HiddenChars {
-		t.Errorf("hidden checked %s", doc.HiddenChecked)
-	}
 
 	// A range of chapters, without the stored part.
 	doc = extractEPUB(t, b, &gofastcore.Options{Parts: gofastcore.PartRange{First: 2, Last: 2}})
@@ -198,9 +194,9 @@ func TestEPUB(t *testing.T) {
 	}
 }
 
-// The navigation document in the spine keeps its landmarks and page list
-// out of view with the hidden attribute, as EPUB 3 provides: routine
-// structure, not hiding. Other hidden content in it is still flagged.
+// The navigation document in the spine declares its landmarks and page
+// list hidden with the hidden attribute, as EPUB 3 provides: that is a
+// declaration like any other, and the blocks get the reason.
 func TestEPUBNavInSpine(t *testing.T) {
 	opf := strings.Replace(opf3, `<spine>`, `<spine><itemref idref="nav"/>`, 1)
 	navDoc := strings.Replace(nav, `</body>`, `<nav epub:type="landmarks" hidden=""><ol><li><a epub:type="bodymatter" href="text/ch1.xhtml">Start</a></li></ol></nav>`+
@@ -208,18 +204,35 @@ func TestEPUBNavInSpine(t *testing.T) {
 	b := buildEPUB(t, "META-INF/container.xml", container, "OEBPS/content.opf", opf, "OEBPS/nav.xhtml", navDoc,
 		"OEBPS/text/ch1.xhtml", `<html><body><p>One.</p></body></html>`)
 	doc := extractEPUB(t, b, nil)
-	flagged := 0
+	hidden := map[string]bool{}
 	for _, blk := range doc.Parts[0].Blocks {
-		if blk.Hidden != 0 {
-			flagged++
-			if blk.Text != "Secret." {
-				t.Errorf("%q flagged %s", blk.Text, blk.Hidden)
+		if blk.Display != 0 {
+			if blk.Display != gofastcore.DisplayHidden {
+				t.Errorf("%q has %s", blk.Text, blk.Display)
 			}
+			hidden[blk.Text] = true
 		}
 	}
-	if flagged != 1 {
-		t.Errorf("%d flagged", flagged)
+	if !hidden["Start"] || !hidden["1"] || !hidden["Secret."] || len(hidden) != 3 {
+		t.Errorf("hidden blocks %v", hidden)
 	}
+}
+
+// Invisible and bidirectional characters in a chapter survive unchanged.
+func TestEPUBCharactersKept(t *testing.T) {
+	b := buildEPUB(t, "META-INF/container.xml", container, "OEBPS/content.opf", opf3, "OEBPS/nav.xhtml", nav,
+		"OEBPS/text/ch1.xhtml", `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>`+r6Text+`</p></body></html>`)
+	doc := extractEPUB(t, b, nil)
+	found := false
+	for _, blk := range doc.AllBlocks() {
+		if blk.Text == r6Text && blk.Display == 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("characters not kept: %s", show(doc))
+	}
+	noRemovedWarnings(t, "epub", doc)
 }
 
 func TestEPUB2(t *testing.T) {

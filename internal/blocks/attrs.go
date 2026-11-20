@@ -5,7 +5,7 @@ import (
 	"github.com/AOShei/go-fast-html/internal/dom"
 )
 
-// The note a stored attribute's text becomes says so in Attrs: type
+// The note an attribute's text becomes says so in Attrs: type
 // "attribute", and the attribute's name under "attribute".
 const (
 	NoteAttribute = "attribute"
@@ -15,11 +15,12 @@ const (
 	AttrChecked = "checked"
 )
 
-// unshown reports the attributes whose text a page stores and does not
-// show: what assistive technology reads (aria-label, aria-description,
-// aria-roledescription, aria-placeholder), tooltips (title), the hint of
-// an empty field (placeholder), and the alt text of an image map's area.
-func unshown(attr, element string) bool {
+// textAttr reports the attributes whose text a page keeps without drawing
+// it in the flow of the page: what assistive technology reads
+// (aria-label, aria-description, aria-roledescription, aria-placeholder),
+// tooltips (title), the hint of an empty field (placeholder), and the alt
+// text of an image map's area.
+func textAttr(attr, element string) bool {
 	switch attr {
 	case "aria-label", "aria-description", "aria-roledescription", "aria-placeholder", "title", "placeholder":
 		return true
@@ -29,19 +30,20 @@ func unshown(attr, element string) bool {
 	return false
 }
 
-// attrNotes emits a note for each unshown attribute of n, flagged
-// invisible, at n's place. A value that only repeats what the element
-// shows (its visible text, or an image's alt text) is left out, so that
-// the common case of a label equal to the text stays quiet. Elements
-// that aria-labelledby or aria-describedby point to are not resolved:
-// they are read where they stand.
+// attrNotes emits a note for each attribute of n whose text the page
+// keeps and does not draw (above), at n's place, with no display reason:
+// the page declares nothing about its display. A value that only repeats
+// the element's own text, or an image's alt text, is left out, since that
+// text is extracted already. Elements that aria-labelledby or
+// aria-describedby point to are not resolved: they are read where they
+// stand.
 func (w *walker) attrNotes(n *dom.Node) {
 	if w.inHead {
 		return
 	}
 	var seen []string
 	for _, a := range n.Attrs {
-		if !unshown(a.Name, n.Name) {
+		if !textAttr(a.Name, n.Name) {
 			continue
 		}
 		v := cleanProse(a.Value, true)
@@ -49,7 +51,7 @@ func (w *walker) attrNotes(n *dom.Node) {
 			continue
 		}
 		seen = append(seen, v)
-		if vis, ok := visibleText(n, len(v)); ok && vis == v {
+		if own, ok := elementText(n, len(v)); ok && own == v {
 			continue
 		}
 		if n.Name == "img" {
@@ -58,11 +60,8 @@ func (w *walker) attrNotes(n *dom.Node) {
 			}
 		}
 		w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: v,
-			// Unshown whether or not n is shown: n's hiding does not flag
-			// it, only being an outlier does.
-			Hidden: w.unshown(v, 0),
-			Attrs:  map[string]string{gofastcore.AttrNoteType: NoteAttribute, AttrAttribute: a.Name},
-			Loc:    w.loc(a.ValStart, a.ValEnd, anchorOf(n))})
+			Attrs: map[string]string{gofastcore.AttrNoteType: NoteAttribute, AttrAttribute: a.Name},
+			Loc:   w.loc(a.ValStart, a.ValEnd, anchorOf(n))})
 	}
 }
 
@@ -75,11 +74,11 @@ func contains(ss []string, s string) bool {
 	return false
 }
 
-// visibleText returns the text under n that is not hidden, white space
-// collapsed. It reads no more than a few times limit bytes, and reports
-// false when there was more: the text is then longer than a value of
-// limit bytes and cannot equal it.
-func visibleText(n *dom.Node, limit int) (string, bool) {
+// elementText returns the text under n, white space collapsed. It reads no
+// more than a few times limit bytes, and reports false when there was
+// more: the text is then longer than a value of limit bytes and cannot
+// equal it.
+func elementText(n *dom.Node, limit int) (string, bool) {
 	max := 4*limit + 64
 	var out []byte
 	over := false
@@ -87,7 +86,7 @@ func visibleText(n *dom.Node, limit int) (string, bool) {
 	walk = func(p *dom.Node) {
 		for c := p.FirstChild; c != nil && !over; c = c.Next {
 			switch {
-			case c.Type == dom.TextNode && c.Hidden == 0:
+			case c.Type == dom.TextNode:
 				if len(out)+len(c.Text) > max {
 					over = true
 					return

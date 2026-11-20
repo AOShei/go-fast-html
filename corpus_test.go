@@ -28,8 +28,8 @@ func corpusDir() string {
 type corpusTally struct {
 	files, panics, timeouts, invalid int
 	errors                           map[string]int
-	hidden                           map[string]int // blocks by reason
-	hiddenFiles                      map[string]int // files with a block of that reason
+	display                          map[string]int // blocks by reason
+	displayFiles                     map[string]int // files with a block of that reason
 	warnings                         map[string]int
 }
 
@@ -58,7 +58,7 @@ func errKind(err error) string {
 // TestCorpus extracts every html, md and epub file of the public corpus,
 // dev and held-out, and tallies the outcome. It fails on a panic, a
 // Validate failure or a timeout. Held-out files are reported in
-// aggregate only; the hidden flags of dev files are listed one by one.
+// aggregate only; the display reasons of dev files are listed one by one.
 func TestCorpus(t *testing.T) {
 	root := corpusDir()
 	if _, err := os.Stat(root); err != nil {
@@ -73,7 +73,7 @@ func TestCorpus(t *testing.T) {
 			if err != nil {
 				continue
 			}
-			c := corpusTally{errors: map[string]int{}, hidden: map[string]int{}, hiddenFiles: map[string]int{}, warnings: map[string]int{}}
+			c := corpusTally{errors: map[string]int{}, display: map[string]int{}, displayFiles: map[string]int{}, warnings: map[string]int{}}
 			for _, ent := range ents {
 				if ent.IsDir() {
 					continue
@@ -121,25 +121,25 @@ func TestCorpus(t *testing.T) {
 				}
 				seen := map[string]bool{}
 				for p, b := range doc.AllBlocks() {
-					if b.Hidden == 0 {
+					if b.Display == 0 {
 						continue
 					}
-					c.add(c.hidden, b.Hidden.String())
-					if !seen[b.Hidden.String()] {
-						seen[b.Hidden.String()] = true
-						c.add(c.hiddenFiles, b.Hidden.String())
+					c.add(c.display, b.Display.String())
+					if !seen[b.Display.String()] {
+						seen[b.Display.String()] = true
+						c.add(c.displayFiles, b.Display.String())
 					}
 					if set == "dev" {
 						ex := []rune(b.Text)
 						if len(ex) > 60 {
 							ex = ex[:60]
 						}
-						t.Logf("flag dev/%s/%s part %d %s %s: %q", format, name, p.Number, b.Kind, b.Hidden, string(ex))
+						t.Logf("display dev/%s/%s part %d %s %s: %q", format, name, p.Number, b.Kind, b.Display, string(ex))
 					}
 				}
 			}
 			t.Logf("%-7s %-4s files=%d errors{%s} invalid=%d panics=%d timeouts=%d blocks{%s} files{%s} warnings{%s}",
-				set, format, c.files, keys(c.errors), c.invalid, c.panics, c.timeouts, keys(c.hidden), keys(c.hiddenFiles), keys(c.warnings))
+				set, format, c.files, keys(c.errors), c.invalid, c.panics, c.timeouts, keys(c.display), keys(c.displayFiles), keys(c.warnings))
 		}
 	}
 }

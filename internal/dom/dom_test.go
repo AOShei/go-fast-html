@@ -13,8 +13,8 @@ func render(n *Node, sb *strings.Builder) {
 		switch c.Type {
 		case TextNode:
 			sb.WriteString(`"` + string(c.Text) + `"`)
-			if c.Hidden != 0 {
-				sb.WriteString("{" + c.Hidden.String() + "}")
+			if c.Display != 0 {
+				sb.WriteString("{" + c.Display.String() + "}")
 			}
 		case CommentNode:
 			sb.WriteString("<!" + string(c.Text) + ">")
@@ -57,16 +57,25 @@ func TestTree(t *testing.T) {
 		{"<pre>\nx\n</pre>", "<pre>\"x\n\"</pre>"},
 		{"<td>x</td>", `"x"`},
 		{"<head><title>T</title></head>x", `<head><title>"T"</title></head>"x"`},
-		{"<p hidden>a<span style='display:block'>b</span></p>", `<p>"a"{invisible}<span>"b"{invisible}</span></p>`},
-		{"<div style='visibility:hidden'>a<b style='visibility:visible'>b</b></div>", `<div>"a"{invisible}<b>"b"</b></div>`},
-		{"<span style='font-size:0'>a<b style='font-size:12px'>b</b></span>", `<span>"a"{tiny}<b>"b"</b></span>`},
-		{"<span style='color:#fff'>a</span><span style='color:#fff;background:#000'>b</span>", `<span>"a"{low_contrast}</span><span>"b"</span>`},
-		{"<font color=white>a</font>", `<font>"a"{low_contrast}</font>`},
-		{"<span style='opacity:0'>a</span><span style='color:transparent'>b</span>", `<span>"a"{transparent}</span><span>"b"{transparent}</span>`},
-		{"<details><summary>s</summary>d</details>", `<details><summary>"s"</summary>"d"</details>`},
-		{"<template>t</template><noscript>n</noscript>", `<template>"t"</template><noscript>"n"</noscript>`},
-		{"<div aria-hidden=true>a</div><div style='position:absolute;left:-10000px'>b</div>", `<div>"a"</div><div>"b"{off_page}</div>`},
-		{"<div aria-hidden=true style='display:none'>a</div><p hidden aria-hidden=false>b</p>", `<div>"a"{invisible}</div><p>"b"{invisible}</p>`},
+		// Declared: the hidden attribute, display, visibility, opacity 0,
+		// a transparent colour, a template, SVG attributes.
+		{"<p hidden>a<span style='display:block'>b</span></p>", `<p>"a"{hidden}<span>"b"{hidden}</span></p>`},
+		{"<p hidden=until-found>a</p><p hidden style='display:block'>b</p>", `<p>"a"{hidden}</p><p>"b"</p>`},
+		{"<div style='visibility:hidden'>a<b style='visibility:visible'>b</b></div>", `<div>"a"{hidden}<b>"b"</b></div>`},
+		{"<div style='visibility:collapse'>a</div>", `<div>"a"{hidden}</div>`},
+		{"<span style='opacity:0'>a<b style='opacity:1'>b</b></span><span style='opacity:0.01'>c</span>", `<span>"a"{no_ink}<b>"b"{no_ink}</b></span><span>"c"</span>`},
+		{"<span style='color:transparent'>a<b style='color:red'>b</b></span><span style='color:rgba(0,0,0,0)'>c</span>", `<span>"a"{no_ink}<b>"b"</b></span><span>"c"{no_ink}</span>`},
+		{"<span style='color:rgb(0 0 0 / 0.01)'>a</span><span style='color:transparent'><i style='color:inherit'>b</i></span>", `<span>"a"</span><span><i>"b"{no_ink}</i></span>`},
+		{"<template>t</template><noscript>n</noscript>", `<template>"t"{hidden}</template><noscript>"n"</noscript>`},
+		{"<svg><g display=none><text>a</text></g><text visibility=hidden>b<tspan visibility=visible>c</tspan></text></svg>", `<svg><g><text>"a"{hidden}</text></g><text>"b"{hidden}<tspan>"c"</tspan></text></svg>`},
+		{"<svg><text hidden>a</text></svg>", `<svg><text>"a"</text></svg>`},
+		// Not declared, so not reported: inferred from size, colour,
+		// position or clipping, or shown on a condition.
+		{"<span style='font-size:0'>a</span><span style='color:#fff'>b</span><font color=white>c</font>", `<span>"a"</span><span>"b"</span><font>"c"</font>`},
+		{"<div style='position:absolute;left:-10000px'>a</div><div style='width:1px;height:1px;overflow:hidden'>b</div><div style='clip:rect(0 0 0 0)'>c</div>", `<div>"a"</div><div>"b"</div><div>"c"</div>`},
+		{"<details><summary>s</summary>d</details><dialog>g</dialog><ruby>r<rp>(</rp></ruby>", `<details><summary>"s"</summary>"d"</details><dialog>"g"</dialog><ruby>"r"<rp>"("</rp></ruby>`},
+		{"<div aria-hidden=true>a</div>", `<div>"a"</div>`},
+		{"<div aria-hidden=true style='display:none'>a</div><p hidden aria-hidden=false>b</p>", `<div>"a"{hidden}</div><p>"b"{hidden}</p>`},
 		{"<script>var a='<p>'</script><style>p{}</style>", `<script>"var a='<p>'"</script><style>"p{}"</style>`},
 		{"a<!-- c -->b", `"a"<! c >"b"`},
 	} {
@@ -94,7 +103,7 @@ func TestDepthLimit(t *testing.T) {
 		for c := n.FirstChild; c != nil; c = c.Next {
 			if c.Type == TextNode && string(c.Text) == "secret" {
 				found = true
-				if c.Hidden == 0 {
+				if c.Display == 0 {
 					t.Error("hidden text past the stack bound lost its flag")
 				}
 			}
@@ -113,7 +122,7 @@ func TestDeepHiddenWithinStack(t *testing.T) {
 	var check func(n *Node)
 	check = func(n *Node) {
 		for c := n.FirstChild; c != nil; c = c.Next {
-			if c.Type == TextNode && c.Hidden == 0 {
+			if c.Type == TextNode && c.Display == 0 {
 				t.Errorf("text %q not flagged", c.Text)
 			}
 			check(c)

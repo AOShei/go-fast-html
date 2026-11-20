@@ -21,9 +21,11 @@ func TestMarkdown(t *testing.T) {
 		{"`co*de*` \\*lit\\*", "paragraph\"co*de* *lit*\""},
 		{"a  \nb", `paragraph"a\nb"`},
 		{"| h1 | h2 |\n|----|----|\n| a  | b  |", `table[["h1" "h2"] ["a" "b"]]`},
-		{"text <span style=\"display:none\">hidden</span> more", `paragraph{invisible}"text hidden more"`},
+		{"text <span style=\"display:none\">hidden</span> more", `paragraph{hidden}"text hidden more"`},
+		{"<p style=\"opacity:0\">raw</p>", `paragraph{no_ink}"raw"`},
+		{"<p style=\"font-size:1px;color:#fff\">raw</p>", `paragraph"raw"`},
 		{"<!-- secret note -->\n\npara", `note"secret note" paragraph"para"`},
-		{"<div hidden>\n\nhidden *para*\n\n</div>", `paragraph{invisible}"hidden para"`},
+		{"<div hidden>\n\nhidden *para*\n\n</div>", `paragraph{hidden}"hidden para"`},
 		{"\uFB01ne", `paragraph"fine"`},
 	} {
 		if got := show(extractAs(t, "md", c.in, nil)); got != c.want {
@@ -101,9 +103,6 @@ func TestMarkdownLinks(t *testing.T) {
 	if b.Text != "See the docs." || len(b.Spans) != 1 || b.Spans[0].Href != "https://example.com/docs" {
 		t.Errorf("block %+v", b)
 	}
-	if doc.HiddenChecked != gofastcore.HiddenChars|gofastcore.HiddenInvisible {
-		t.Errorf("hidden checked %s", doc.HiddenChecked)
-	}
 }
 
 func TestPlainText(t *testing.T) {
@@ -115,9 +114,6 @@ func TestPlainText(t *testing.T) {
 	b := doc.Parts[0].Blocks[1]
 	if got := src[b.Loc.Offset : b.Loc.Offset+b.Loc.Length]; got != "  Para \uFB01 two\twith tab\x07" {
 		t.Errorf("loc %q", got)
-	}
-	if doc.HiddenChecked != gofastcore.HiddenChars {
-		t.Errorf("hidden checked %s", doc.HiddenChecked)
 	}
 	// windows-1252 text, located in the source bytes.
 	src = "caf\xE9\n\nna\xEFve"

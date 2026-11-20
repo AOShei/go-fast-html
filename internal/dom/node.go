@@ -6,16 +6,16 @@
 // closed by a block, foster parenting of content misplaced in tables,
 // foreign content (SVG, MathML) and the elements that break out of it.
 //
-// Every node records the reasons its text is not shown, worked out from
-// the element and its ancestors: the hidden attribute, inline style
-// (display, visibility, opacity, font-size, color against background,
-// offsets that move it out of view, clipping), template, noscript, script
-// and style, aria-hidden, a closed details or dialog element.
+// Every node records what the page declares about its display, following
+// the element and its ancestors: the hidden attribute, a template's inert
+// content, SVG display and visibility attributes, and inline style
+// display, visibility, opacity:0 and a fully transparent colour. Nothing
+// is judged: no colour is compared, no size or position measured.
 //
 // Nesting is bounded: below MaxDepth elements are attached to the
 // deepest allowed node instead of nesting further, and the stack of open
-// elements has a bound of its own. The reasons text is hidden are kept
-// across both bounds.
+// elements has a bound of its own. The declared reasons are kept across
+// both bounds.
 package dom
 
 import (
@@ -66,10 +66,11 @@ type Node struct {
 	// from its start tag to the end of its end tag or of the last thing
 	// in it.
 	Start, End int
-	// Hidden holds the reasons the node's text is not shown. For an
+	// Display holds the reasons the page declares that the node is not
+	// displayed or has no ink, following inheritance as CSS does. For an
 	// element it covers the element and everything in it.
-	Hidden gofastcore.Hidden
-	WS     WS
+	Display gofastcore.Display
+	WS      WS
 
 	Parent, FirstChild, LastChild, Prev, Next *Node
 

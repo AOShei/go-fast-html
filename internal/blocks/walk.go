@@ -2,13 +2,12 @@
 // shared model: headings, paragraphs, list items, tables, code, quotes,
 // captions, images, comments and form values, with white space collapsed
 // as CSS white-space: normal does, links and styles as spans, and the
-// reasons text is hidden.
+// display reasons the page declares.
 package blocks
 
 import (
 	"context"
 	"strings"
-	"unicode"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/dom"
@@ -50,9 +49,6 @@ type Result struct {
 	// Stored holds what the page keeps and shows nowhere: script and
 	// style text, hidden form values. It goes to the stored part.
 	Stored []gofastcore.Block
-	// Outliers counts unshown items (comments, attribute text) long
-	// enough to be flagged; see gofastcore.UnshownOutlier.
-	Outliers int
 }
 
 // MaxMeta bounds the length of one metadata value.
@@ -91,7 +87,6 @@ type walker struct {
 	caption int
 	cell    int  // inside a table cell: block boundaries are line breaks
 	inHead  bool // inside <head>
-	extra   gofastcore.Hidden
 	steps   int
 	stop    bool
 }
@@ -121,7 +116,7 @@ func (w *walker) node(n *dom.Node) {
 	}
 	switch n.Type {
 	case dom.TextNode:
-		w.buf.add(n.Text, n.WS, n.Hidden|w.extra, false)
+		w.buf.add(n.Text, n.WS, n.Display, false)
 		w.buf.cover(n.Start, n.End)
 	case dom.CommentNode:
 		w.comment(n)
@@ -208,7 +203,7 @@ func (w *walker) element(n *dom.Node) {
 		// A thematic break; in a table cell, only a line break.
 		w.hardFlush()
 		if w.cell == 0 {
-			w.emit(gofastcore.Block{Kind: gofastcore.KindThematicBreak, Hidden: n.Hidden | w.extra,
+			w.emit(gofastcore.Block{Kind: gofastcore.KindThematicBreak, Display: n.Display,
 				Loc: w.loc(n.Start, n.End, anchorOf(n))})
 		}
 		return
@@ -277,8 +272,8 @@ func (w *walker) element(n *dom.Node) {
 		w.input(n)
 		return
 	case "rp":
-		// Parentheses for browsers without ruby; read as text, since
-		// they are routine and not a signal.
+		// Parentheses for browsers without ruby; read as text, with no
+		// display reason.
 		w.inline(n, 0)
 		return
 	case "form":
@@ -373,9 +368,9 @@ func (w *walker) flush() {
 		w.buf.softBreak()
 		return
 	}
-	text, hidden, spans := w.buf.finish()
+	text, display, spans := w.buf.finish()
 	if text != "" {
-		b := gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Hidden: hidden, Spans: spans}
+		b := gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Display: display, Spans: spans}
 		switch {
 		case w.heading > 0:
 			b.Kind, b.Level = gofastcore.KindHeading, uint8(w.heading)
@@ -524,11 +519,11 @@ func (w *walker) code(n *dom.Node, lang string) {
 	w.verbatim(n)
 	b := w.buf
 	w.buf = saved
-	text, hidden, spans := b.verbatimText()
+	text, display, spans := b.verbatimText()
 	if text == "" {
 		return
 	}
-	blk := gofastcore.Block{Kind: gofastcore.KindCode, Text: text, Hidden: hidden, Spans: spans,
+	blk := gofastcore.Block{Kind: gofastcore.KindCode, Text: text, Display: display, Spans: spans,
 		Loc: w.loc(n.Start, n.End, anchorOf(n))}
 	if lang != "" {
 		blk.Attrs = map[string]string{gofastcore.AttrLanguage: lang}
@@ -541,8 +536,8 @@ func (w *walker) code(n *dom.Node, lang string) {
 }
 
 // storedCode puts the text of a script or style element in the stored
-// part, as code, verbatim, with Attrs["stored"] saying what it is. It is
-// not flagged: pages routinely carry scripts and styles.
+// part, as code, verbatim, with Attrs["stored"] saying what it is, and no
+// display reason.
 func (w *walker) storedCode(n *dom.Node, lang, stored string) {
 	if w.stop {
 		return
@@ -576,23 +571,12 @@ func (w *walker) store(b gofastcore.Block) {
 	w.res.Stored = append(w.res.Stored, b)
 }
 
-// unshown returns the reasons for a stored, unshown item of text: h, and
-// invisible too when the text is an outlier by core's rule
-// (gofastcore.UnshownOutlier).
-func (w *walker) unshown(text string, h gofastcore.Hidden) gofastcore.Hidden {
-	if gofastcore.UnshownOutlier(text) {
-		w.res.Outliers++
-		return h | gofastcore.HiddenInvisible
-	}
-	return h
-}
-
 // verbatim adds the text under n as it stands, a <br> as a line break.
 func (w *walker) verbatim(n *dom.Node) {
 	for c := n.FirstChild; c != nil; c = c.Next {
 		switch c.Type {
 		case dom.TextNode:
-			w.buf.add(c.Text, dom.Pre, c.Hidden|w.extra, true)
+			w.buf.add(c.Text, dom.Pre, c.Display, true)
 		case dom.ElementNode:
 			w.activeAttrs(c)
 			if c.Name == "br" {
@@ -612,7 +596,7 @@ func (w *walker) verbatim(n *dom.Node) {
 
 // verbatimText returns code text as it stands; only a text of nothing
 // but white space is dropped.
-func (b *buf) verbatimText() (string, gofastcore.Hidden, []gofastcore.Span) {
+func (b *buf) verbatimText() (string, gofastcore.Display, []gofastcore.Span) {
 	if isBlank(b.b) {
 		return "", 0, nil
 	}
@@ -625,7 +609,7 @@ func (b *buf) verbatimText() (string, gofastcore.Hidden, []gofastcore.Span) {
 	}
 	text := b.b
 	var spans []gofastcore.Span
-	h := b.hiddenSpans(0, len(text), &spans)
+	h := b.displaySpans(0, len(text), &spans)
 	return string(text), h, spans
 }
 
@@ -654,12 +638,11 @@ func (w *walker) comment(n *dom.Node) {
 	if text == "" {
 		return
 	}
+	// A comment is markup, not content the page displays or declares
+	// anything about: it has no display reason.
 	w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: text,
-		// A comment is never shown, so the hiding of the element it
-		// stands in does not flag it; only being an outlier does.
-		Hidden: w.unshown(text, 0),
-		Attrs:  map[string]string{gofastcore.AttrNoteType: gofastcore.NoteComment},
-		Loc:    w.loc(n.Start, n.End, "")})
+		Attrs: map[string]string{gofastcore.AttrNoteType: gofastcore.NoteComment},
+		Loc:   w.loc(n.Start, n.End, "")})
 }
 
 // choices emits the options of a select as a note of type choices.
@@ -690,7 +673,7 @@ func (w *walker) choices(n *dom.Node) {
 	if len(lines) == 0 {
 		return
 	}
-	b := gofastcore.Block{Kind: gofastcore.KindNote, Text: strings.Join(lines, "\n"), Hidden: n.Hidden,
+	b := gofastcore.Block{Kind: gofastcore.KindNote, Text: strings.Join(lines, "\n"), Display: n.Display,
 		Attrs: map[string]string{gofastcore.AttrNoteType: gofastcore.NoteChoices},
 		Loc:   w.loc(n.Start, n.End, anchorOf(n))}
 	if name, _ := n.Attr("name"); cleanRef(name) != "" {
@@ -707,14 +690,14 @@ func (w *walker) input(n *dom.Node) {
 	case "image":
 		w.srcRef(n, "src")
 		if alt, _ := n.Attr("alt"); alt != "" {
-			w.buf.add([]byte(alt), dom.Normal, n.Hidden|w.extra, false)
+			w.buf.add([]byte(alt), dom.Normal, n.Display, false)
 		}
 		return
 	case "submit", "button", "reset":
 		// The value is the button's label, shown where it stands.
 		if v, ok := n.Attr("value"); ok {
 			w.buf.pending = true
-			w.buf.add([]byte(v), dom.Normal, n.Hidden|w.extra, false)
+			w.buf.add([]byte(v), dom.Normal, n.Display, false)
 			w.buf.pending = true
 		}
 		return
@@ -745,15 +728,8 @@ func (w *walker) input(n *dom.Node) {
 		if name, _ := n.Attr("name"); cleanRef(name) != "" {
 			attrs[gofastcore.AttrField] = cleanRef(name)
 		}
-		// A value that is one unbroken token (a view state, a CSRF or
-		// SAML token) is routinely long machine data: it is exempt from
-		// the character rule, and the word rule cannot trip on one token.
-		h := gofastcore.Hidden(0)
-		if strings.ContainsFunc(text, unicode.IsSpace) {
-			h = w.unshown(text, 0)
-		}
 		w.store(gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Attrs: attrs,
-			Hidden: h, Loc: w.loc(n.Start, n.End, anchorOf(n))})
+			Loc: w.loc(n.Start, n.End, anchorOf(n))})
 		return
 	}
 	w.field(n, v, dom.Normal)
@@ -763,12 +739,12 @@ func (w *walker) input(n *dom.Node) {
 // control.
 func (w *walker) field(n *dom.Node, value string, ws dom.WS) {
 	b := newBuf()
-	b.add([]byte(value), ws, n.Hidden|w.extra, false)
-	text, hidden, spans := b.finish()
+	b.add([]byte(value), ws, n.Display, false)
+	text, display, spans := b.finish()
 	if text == "" {
 		return
 	}
-	blk := gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Hidden: hidden, Spans: spans,
+	blk := gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Display: display, Spans: spans,
 		Loc: w.loc(n.Start, n.End, anchorOf(n))}
 	if name, _ := n.Attr("name"); cleanRef(name) != "" {
 		blk.Attrs = map[string]string{gofastcore.AttrField: cleanRef(name)}

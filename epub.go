@@ -183,7 +183,7 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 		if part.Name != "" && !text.Take(len(part.Name)) {
 			part.Name = ""
 		}
-		part.MarkHidden()
+		part.Finish()
 		doc.Parts = append(doc.Parts, part)
 		if text.Spent() {
 			cutShort = true
@@ -212,7 +212,7 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 func emptyChapter() gofastcore.Part {
 	p := gofastcore.Part{Kind: gofastcore.PartChapter, Number: 1}
 	p.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "the publication has no chapters")
-	p.MarkHidden()
+	p.Finish()
 	return p
 }
 
@@ -229,8 +229,7 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 		return nil
 	}
 	pc := pageConfig{opts: opts, text: text, decode: decode,
-		xhtml:  it.MediaType != "text/html",
-		navDoc: hasProperty(it.Properties, "nav"),
+		xhtml: it.MediaType != "text/html",
 		image: func(src string) (blocks.ImageRef, bool) {
 			p, ok := epub.Resolve(it.Path, src)
 			if !ok || !a.Has(p) {
@@ -277,7 +276,6 @@ func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub
 	if n := len(doc.Parts); n > 0 {
 		last = max(last, doc.Parts[n-1].Number)
 	}
-	// Not hidden as a whole: a publication routinely stores such things.
 	// The scripts and styles of the chapters come first.
 	stored := gofastcore.Part{Kind: gofastcore.PartStored, Number: last + 1, Blocks: t.stored}
 	for _, it := range pkg.Manifest {
@@ -338,7 +336,7 @@ func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub
 	}
 done:
 	if len(stored.Blocks) > 0 {
-		stored.MarkHidden()
+		stored.Finish()
 		doc.Parts = append(doc.Parts, stored)
 	}
 }

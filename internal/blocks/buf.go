@@ -8,20 +8,20 @@ import (
 	"github.com/AOShei/go-fast-html/internal/dom"
 )
 
-// run is a stretch of the text with the reasons it is hidden.
+// run is a stretch of the text with the display reasons declared for it.
 type run struct {
 	start, end int
-	h          gofastcore.Hidden
+	h          gofastcore.Display
 }
 
 // buf collects the text of one block.
 type buf struct {
 	b       []byte
 	runs    []run
-	spans   []gofastcore.Span // styles and links
-	pending bool              // collapsed white space waiting for a following character
-	from    int               // where the text being added starts
-	cur     gofastcore.Hidden // and the reasons it is hidden
+	spans   []gofastcore.Span  // styles and links
+	pending bool               // collapsed white space waiting for a following character
+	from    int                // where the text being added starts
+	cur     gofastcore.Display // and its display reasons
 	// start and end are the block's range in the decoded input; start is
 	// -1 while nothing has been added.
 	start, end int
@@ -54,13 +54,13 @@ func (b *buf) cover(start, end int) {
 // unless it would lead the block or follow a line break.
 //
 // A space written at the start of the text being added stands between it
-// and the text before it, and is hidden only for the reasons both share.
+// and the text before it, and carries only the reasons both share.
 func (b *buf) space() {
 	if b.pending && len(b.b) > 0 && b.b[len(b.b)-1] != '\n' {
 		b.b = append(b.b, ' ')
 		if len(b.b)-1 == b.from {
 			n := len(b.runs)
-			var prev gofastcore.Hidden
+			var prev gofastcore.Display
 			if n > 0 && b.runs[n-1].end == b.from {
 				prev = b.runs[n-1].h
 			}
@@ -111,11 +111,13 @@ func (b *buf) clip() {
 	}
 }
 
-// add appends text in the given white-space mode with the reasons it is
-// hidden. Verbatim text (declared code) keeps every character but
-// controls; other text has its white space collapsed per mode and its
-// ligatures written as letters.
-func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Hidden, verbatim bool) {
+// add appends text in the given white-space mode with its declared
+// display reasons. Verbatim text (declared code) keeps every character but
+// controls (Unicode Cc); other text has its white space collapsed per mode
+// and its ligatures written as letters. Format characters (zero-width
+// characters, bidirectional controls, tag characters) and variation
+// selectors are kept as they are.
+func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Display, verbatim bool) {
 	b.from, b.cur = len(b.b), h
 	defer func() { b.mark(b.from, h) }()
 	keep := verbatim || ws == dom.Pre
@@ -172,7 +174,7 @@ func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Hidden, verbatim bool) {
 }
 
 // mark records that the text from offset from to the end has reasons h.
-func (b *buf) mark(from int, h gofastcore.Hidden) {
+func (b *buf) mark(from int, h gofastcore.Display) {
 	to := len(b.b)
 	if to <= from {
 		return
@@ -184,9 +186,9 @@ func (b *buf) mark(from int, h gofastcore.Hidden) {
 	b.runs = append(b.runs, run{from, to, h})
 }
 
-// finish returns the block's text, trimmed, with its hidden reasons and
+// finish returns the block's text, trimmed, with its display reasons and
 // spans.
-func (b *buf) finish() (text string, hidden gofastcore.Hidden, spans []gofastcore.Span) {
+func (b *buf) finish() (text string, display gofastcore.Display, spans []gofastcore.Span) {
 	s := b.b
 	lead := 0
 	for lead < len(s) {
@@ -208,17 +210,17 @@ func (b *buf) finish() (text string, hidden gofastcore.Hidden, spans []gofastcor
 		return "", 0, nil
 	}
 	text = string(s[lead:end])
-	hidden = b.hiddenSpans(lead, end, &spans)
+	display = b.displaySpans(lead, end, &spans)
 	spans = b.styleSpans(lead, end, spans)
-	return text, hidden, spans
+	return text, display, spans
 }
 
-// hiddenSpans works out the block's hidden reasons and appends spans for
-// the passages hidden for reasons the rest of the block does not share.
-func (b *buf) hiddenSpans(lead, end int, spans *[]gofastcore.Span) gofastcore.Hidden {
+// displaySpans works out the block's display reasons and appends spans
+// for the passages with reasons the rest of the block does not share.
+func (b *buf) displaySpans(lead, end int, spans *[]gofastcore.Span) gofastcore.Display {
 	type piece struct {
 		start, end int
-		h          gofastcore.Hidden
+		h          gofastcore.Display
 		blank      bool
 	}
 	var ps []piece
@@ -229,7 +231,7 @@ func (b *buf) hiddenSpans(lead, end int, spans *[]gofastcore.Span) gofastcore.Hi
 		}
 		ps = append(ps, piece{s - lead, e - lead, r.h, isBlank(b.b[s:e])})
 	}
-	whole, any, seen := gofastcore.HiddenAny, gofastcore.Hidden(0), false
+	whole, any, seen := gofastcore.DisplayAny, gofastcore.Display(0), false
 	for _, p := range ps {
 		if !p.blank {
 			whole &= p.h
@@ -240,12 +242,12 @@ func (b *buf) hiddenSpans(lead, end int, spans *[]gofastcore.Span) gofastcore.Hi
 	if !seen || any == 0 {
 		return 0
 	}
-	// White space between two passages hidden alike is hidden with them.
+	// White space between two passages with the same reasons takes them.
 	for i := range ps {
 		if !ps[i].blank {
 			continue
 		}
-		var before, after gofastcore.Hidden
+		var before, after gofastcore.Display
 		if i > 0 {
 			before = ps[i-1].h
 		}
@@ -263,11 +265,11 @@ func (b *buf) hiddenSpans(lead, end int, spans *[]gofastcore.Span) gofastcore.Hi
 		if part == 0 {
 			continue
 		}
-		if n := len(*spans); n > 0 && (*spans)[n-1].End == p.start && (*spans)[n-1].Hidden == part {
+		if n := len(*spans); n > 0 && (*spans)[n-1].End == p.start && (*spans)[n-1].Display == part {
 			(*spans)[n-1].End = p.end
 			continue
 		}
-		*spans = append(*spans, gofastcore.Span{Start: p.start, End: p.end, Hidden: part})
+		*spans = append(*spans, gofastcore.Span{Start: p.start, End: p.end, Display: part})
 	}
 	return any
 }

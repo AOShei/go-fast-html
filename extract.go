@@ -236,7 +236,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 		return e.epub(ctx, doc, src, opts, text, decode)
 	}
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
-	t := &tally{plain: format == "txt"}
+	t := &tally{}
 	res, err := e.page(ctx, src, format, pageConfig{opts: opts, text: text, decode: decode}, &part, t)
 	if err != nil {
 		return nil, err
@@ -247,7 +247,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	doc.Parts = append(doc.Parts, part)
 	if len(t.stored) > 0 && opts.Parts == (gofastcore.PartRange{}) {
 		stored := gofastcore.Part{Kind: gofastcore.PartStored, Number: 2, Blocks: t.stored}
-		stored.MarkHidden()
+		stored.Finish()
 		doc.Parts = append(doc.Parts, stored)
 	}
 	t.finish(doc)
@@ -257,14 +257,13 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 // tally collects what the pages of a document found that concerns the
 // document as a whole.
 type tally struct {
-	plain                         bool // only plain text: nothing can hide text
-	active, external, stylesheets int
-	metaCut                       bool
-	charsets                      []string           // declared encodings not decoded
-	stored                        []gofastcore.Block // for the stored part
+	active, external int
+	metaCut          bool
+	charsets         []string           // declared encodings not decoded
+	stored           []gofastcore.Block // for the stored part
 }
 
-// finish adds the document's warnings and HiddenChecked.
+// finish adds the document's warnings.
 func (t *tally) finish(doc *gofastcore.Document) {
 	for _, c := range t.charsets {
 		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
@@ -272,7 +271,7 @@ func (t *tally) finish(doc *gofastcore.Document) {
 	}
 	if t.active > 0 {
 		doc.Warn(gofastcore.SeverityInfo, gofastcore.WarnInputActiveContent,
-			fmt.Sprintf("%d scripts, event handler attributes or javascript: addresses; script text is read as data, flagged invisible, and nothing is run", t.active))
+			fmt.Sprintf("%d scripts, event handler attributes or javascript: addresses; script text is read as data into the stored part, and nothing is run", t.active))
 	}
 	if t.external > 0 {
 		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnInputExternalReference,
@@ -280,17 +279,6 @@ func (t *tally) finish(doc *gofastcore.Document) {
 	}
 	if t.metaCut {
 		doc.Warn(gofastcore.SeverityInfo, WarnMetadataTruncated, "a metadata value was cut at 64 KiB, or declarations past 256 were left out")
-	}
-	// Without stylesheets or scripts, inline style and attributes are all
-	// that decides what is displayed, and that is read in full. Plain
-	// text has no way to hide text, but only the scan for invisible
-	// characters is claimed for it.
-	doc.HiddenChecked = gofastcore.HiddenChars
-	if !t.plain && t.stylesheets == 0 && t.active == 0 {
-		doc.HiddenChecked |= gofastcore.HiddenInvisible
-	}
-	if hiddenInMetadata(&doc.Metadata) {
-		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextHidden, "the metadata contains invisible characters")
 	}
 }
 
@@ -301,8 +289,6 @@ type pageConfig struct {
 	decode *gofastcore.DecodeBudget
 	// xhtml reads self-closing tags as XML does (EPUB content).
 	xhtml bool
-	// navDoc: the page is an EPUB navigation document (dom.Options).
-	navDoc bool
 	// image resolves an image address, as for EPUB, where images are in
 	// the archive.
 	image    func(src string) (blocks.ImageRef, bool)
@@ -310,7 +296,7 @@ type pageConfig struct {
 }
 
 // page reads one document, an HTML page, Markdown or plain text, or a
-// chapter of an EPUB, into part, and calls MarkHidden on it. What
+// chapter of an EPUB, into part, and calls Finish on it. What
 // concerns the whole document goes to t. It returns the result of the
 // walk, nil for plain text.
 func (e *Extractor) page(ctx context.Context, src []byte, format string, pc pageConfig, part *gofastcore.Part, t *tally) (*blocks.Result, error) {
@@ -346,7 +332,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		if len(part.Blocks) == 0 && !cut {
 			part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")
 		}
-		part.MarkHidden()
+		part.Finish()
 		return nil, nil
 	}
 
@@ -368,7 +354,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		source = func(i int) int64 { return m.Source(h.Source(i)) }
 	}
 
-	tree, err := dom.Parse(ctx, page, dom.Options{MaxDepth: e.MaxDepth, XHTML: pc.xhtml, NavDoc: pc.navDoc})
+	tree, err := dom.Parse(ctx, page, dom.Options{MaxDepth: e.MaxDepth, XHTML: pc.xhtml})
 	if err != nil {
 		return nil, err
 	}
@@ -389,14 +375,8 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	}
 	t.active += res.Active
 	t.external += res.External
-	t.stylesheets += res.Stylesheets
 	t.metaCut = t.metaCut || res.MetaCut
 	t.stored = append(t.stored, res.Stored...)
-	if res.Outliers > 0 {
-		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextUnshownOutlier,
-			fmt.Sprintf("%d items of text the page keeps and does not show (comments, attribute text, form values) hold more than %d words or %d characters; they are flagged invisible",
-				res.Outliers, gofastcore.UnshownOutlierWords, gofastcore.UnshownOutlierChars))
-	}
 	if res.ImageData > 0 && opts.Images == gofastcore.ImagesData {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnImageUnsupportedEncoding,
 			fmt.Sprintf("%d images could not be decoded or read; their blocks have no data", res.ImageData))
@@ -417,7 +397,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 			part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text and no images")
 		}
 	}
-	part.MarkHidden()
+	part.Finish()
 	return res, nil
 }
 
@@ -431,29 +411,4 @@ func blocksLabel(s string) string {
 		out = append(out, r)
 	}
 	return string(out)
-}
-
-// hiddenInMetadata reports whether any metadata value holds invisible
-// characters, which a block flag cannot mark.
-func hiddenInMetadata(m *gofastcore.Metadata) bool {
-	found := func(s string) bool { return gofastcore.InvisibleChars(s) != nil }
-	if found(m.Title) || found(m.Subject) || found(m.Language) || found(m.Application) {
-		return true
-	}
-	for _, s := range m.Authors {
-		if found(s) {
-			return true
-		}
-	}
-	for _, s := range m.Keywords {
-		if found(s) {
-			return true
-		}
-	}
-	for k, v := range m.Extra {
-		if found(k) || found(v) {
-			return true
-		}
-	}
-	return false
 }

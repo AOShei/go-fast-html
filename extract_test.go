@@ -42,8 +42,8 @@ func show(doc *gofastcore.Document) string {
 		if b.Marker != "" {
 			s += "[" + b.Marker + "]"
 		}
-		if b.Hidden != 0 {
-			s += "{" + b.Hidden.String() + "}"
+		if b.Display != 0 {
+			s += "{" + b.Display.String() + "}"
 		}
 		if b.Table != nil {
 			s += fmt.Sprintf("%q", b.Table.Rows)
@@ -68,7 +68,7 @@ func TestStructure(t *testing.T) {
 		{"<pre>\n  x = 1\n\ty</pre>", "code\"  x = 1\\n\\ty\""},
 		{"a<br>b<br><br>c", `paragraph"a\nb\n\nc"`},
 		{"<p>x</p><hr><p>y</p>", `paragraph"x" thematic_break"" paragraph"y"`},
-		{"<hr hidden><table><tr><td>a<hr>b</table>", `thematic_break{invisible}"" table[["a\nb"]]`},
+		{"<hr hidden><table><tr><td>a<hr>b</table>", `thematic_break{hidden}"" table[["a\nb"]]`},
 		{"<figure><img src=a.png alt='A  cat'><figcaption>Cap</figcaption></figure>", `image"A cat" caption"Cap"`},
 		{"<p>See <img alt=pic src=x.png> here</p>", `paragraph"See here" image"pic"`},
 		{"<table><tr><th>A<th>B<tr><td>1<td>2</table>", `table[["A" "B"] ["1" "2"]]`},
@@ -79,7 +79,7 @@ func TestStructure(t *testing.T) {
 		{"x<!-- note -->y", `paragraph"xy" note"note"`},
 		{"<select name=s><option>One<option>Two</select>", `note"One\nTwo"`},
 		{"<script>var x = '<p>';</script><p>t</p>", `paragraph"t"`},
-		{"<template><p>t</p></template><noscript><p>n</p></noscript>", `paragraph"t" paragraph"n"`},
+		{"<template><p>t</p></template><noscript><p>n</p></noscript>", `paragraph{hidden}"t" paragraph"n"`},
 		{"<details><summary>S</summary><p>D</p></details><dialog>G</dialog>", `paragraph"S" paragraph"D" paragraph"G"`},
 		{"<ruby>A<rp>(</rp><rt>a</rt><rp>)</rp></ruby>", `paragraph"A(a)"`},
 		{"<p>\uFB01ne</p>", `paragraph"fine"`},
@@ -93,47 +93,128 @@ func TestStructure(t *testing.T) {
 	}
 }
 
-func TestHidden(t *testing.T) {
+// Each mechanism by which a page declares that text is not displayed, or
+// is drawn with no ink, gives its reason.
+func TestDeclaredDisplay(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
-		{"<p hidden>a</p>", `paragraph{invisible}"a"`},
-		{"<p>Visible <span style='display:none'>secret</span> text</p>", `paragraph{invisible}"Visible secret text"`},
-		{"<div style='visibility:hidden'><p>a</p></div>", `paragraph{invisible}"a"`},
-		{"<p style='font-size:0'>a</p>", `paragraph{tiny}"a"`},
-		{"<p style='opacity:0'>a</p>", `paragraph{transparent}"a"`},
-		{"<p style='color:#fefefe'>a</p>", `paragraph{low_contrast}"a"`},
-		{"<p style='position:absolute;left:-9999px'>a</p>", `paragraph{off_page}"a"`},
-		{"<p>a\u200B\u200B\u200B\u200Bb</p>", fmt.Sprintf("paragraph{invisible_chars}%q", "a\u200B\u200B\u200B\u200Bb")},
-		{"<img hidden alt=x src=a.png>", `image{invisible}"x"`},
-		{"<table><tr><td>a<td hidden>b</table>", `table{invisible}[["a" "b"]]`},
+		{"<p hidden>a</p>", `paragraph{hidden}"a"`},
+		{"<p hidden=until-found>a</p>", `paragraph{hidden}"a"`},
+		{"<p>Visible <span style='display:none'>secret</span> text</p>", `paragraph{hidden}"Visible secret text"`},
+		{"<div style='visibility:hidden'><p>a</p></div>", `paragraph{hidden}"a"`},
+		{"<div style='visibility:collapse'><p>a</p></div>", `paragraph{hidden}"a"`},
+		{"<div style='visibility:hidden'><p style='visibility:visible'>a</p></div>", `paragraph"a"`},
+		{"<p style='opacity:0'>a</p>", `paragraph{no_ink}"a"`},
+		{"<p style='color:transparent'>a</p>", `paragraph{no_ink}"a"`},
+		{"<p style='color:rgba(10,20,30,0)'>a</p>", `paragraph{no_ink}"a"`},
+		{"<p style='color:#0000'>a</p>", `paragraph{no_ink}"a"`},
+		{"<svg><text display='none'>a</text></svg>", `paragraph{hidden}"a"`},
+		{"<svg><text visibility='hidden'>a</text></svg>", `paragraph{hidden}"a"`},
+		{"<template><p>a</p></template>", `paragraph{hidden}"a"`},
+		{"<img hidden alt=x src=a.png>", `image{hidden}"x"`},
+		{"<table><tr><td>a<td hidden>b</table>", `table{hidden}[["a" "b"]]`},
+		{"<p hidden style='opacity:0'>a</p>", `paragraph{hidden+no_ink}"a"`},
 	} {
 		doc := extract(t, c.in, nil)
 		if got := show(doc); got != c.want {
 			t.Errorf("%q:\n got %s\nwant %s", c.in, got, c.want)
 		}
-		if !doc.Parts[0].Has(gofastcore.WarnTextHidden) {
-			t.Errorf("%q: no text.hidden warning", c.in)
-		}
+		noRemovedWarnings(t, c.in, doc)
 	}
-	// A partly hidden paragraph has a span over the hidden passage.
+	// A paragraph with a hidden passage has a span over the passage.
 	doc := extract(t, "<p>Visible one. <span hidden>Hidden.</span> Visible two.</p>", nil)
 	b := doc.Parts[0].Blocks[0]
-	if len(b.Spans) != 1 || b.Text[b.Spans[0].Start:b.Spans[0].End] != "Hidden." || b.Spans[0].Hidden != gofastcore.HiddenInvisible {
+	if len(b.Spans) != 1 || b.Text[b.Spans[0].Start:b.Spans[0].End] != "Hidden." || b.Spans[0].Display != gofastcore.DisplayHidden {
 		t.Errorf("spans %+v over %q", b.Spans, b.Text)
 	}
-	if got := b.VisibleText(gofastcore.HiddenAny); got != "Visible one. Visible two." {
-		t.Errorf("visible text %q", got)
+	if got := b.DisplayedText(gofastcore.DisplayAny); got != "Visible one. Visible two." {
+		t.Errorf("displayed text %q", got)
 	}
-	// Partly hidden table: the cell is marked.
+	// A table with a hidden cell: the cell is marked.
 	doc = extract(t, "<table><tr><td>a<td hidden>b</table>", nil)
-	if h := doc.Parts[0].Blocks[0].Table.Hidden; len(h) != 1 || h[0].Col != 1 {
-		t.Errorf("hidden cells %+v", h)
+	if h := doc.Parts[0].Blocks[0].Table.Display; len(h) != 1 || h[0].Col != 1 {
+		t.Errorf("display cells %+v", h)
+	}
+}
+
+// What the page does not declare gets no reason: one case for each check
+// that used to infer it (size, contrast, position, clipping), a threshold
+// opacity, and the elements that are shown on a condition or interaction.
+func TestNotDeclaredNoReason(t *testing.T) {
+	for _, in := range []string{
+		"<p style='font-size:0'>a</p>",
+		"<p style='font-size:1px'>a</p>",
+		"<p style='color:#fefefe'>a</p>",
+		"<div style='background:#000'><p style='color:#010101'>a</p></div>",
+		"<p style='position:absolute;left:-9999px'>a</p>",
+		"<p style='text-indent:-9999px'>a</p>",
+		"<p style='clip:rect(0 0 0 0);position:absolute'>a</p>",
+		"<p style='clip-path:inset(50%)'>a</p>",
+		"<p style='width:1px;height:1px;overflow:hidden'>a</p>",
+		"<p style='opacity:0.01'>a</p>",
+		"<p style='color:rgba(0,0,0,0.01)'>a</p>",
+		"<p aria-hidden=true>a</p>",
+		"<noscript><p>a</p></noscript>",
+		"<details><p>a</p></details>",
+		"<dialog><p>a</p></dialog>",
+	} {
+		doc := extract(t, in, nil)
+		for _, b := range doc.AllBlocks() {
+			if b.Display != 0 {
+				t.Errorf("%q: %s block %q has %s", in, b.Kind, b.Text, b.Display)
+			}
+		}
+		noRemovedWarnings(t, in, doc)
+	}
+	// Notes and the stored part carry no reason, not even inside a
+	// hidden element.
+	doc := extract(t, "<div hidden><!-- c --><b title='tip'>x</b><input type=hidden value=v><script>s()</script></div>", nil)
+	for _, b := range doc.AllBlocks() {
+		if b.Kind != gofastcore.KindParagraph && b.Display != 0 {
+			t.Errorf("%s %q has %s", b.Kind, b.Text, b.Display)
+		}
+	}
+}
+
+// noRemovedWarnings fails if doc carries a warning that core no longer
+// defines.
+func noRemovedWarnings(t *testing.T, in string, doc *gofastcore.Document) {
+	t.Helper()
+	for _, w := range doc.AllWarnings() {
+		if w.Code == "text.hidden" || w.Code == "text.unshown_outlier" {
+			t.Errorf("%q: warning %s", in, w.Code)
+		}
+	}
+}
+
+// r6Text holds tag characters, a right-to-left override with its pop, a
+// run of zero-width characters and a variation selector.
+const r6Text = "a\U000E0041\U000E0042\U000E007F b\u202Ecba\u202C c\u200B\u200C\u200D\u2060d e\uFE0F"
+
+// Invisible and bidirectional characters survive extraction unchanged,
+// with no reason and no warning.
+func TestCharactersKept(t *testing.T) {
+	for _, format := range []string{"html", "md", "txt"} {
+		doc, err := (&Extractor{Format: format}).Extract(context.Background(), strings.NewReader(r6Text), int64(len(r6Text)), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := doc.Validate(); err != nil {
+			t.Errorf("%s: Validate: %v", format, err)
+		}
+		b := doc.Parts[0].Blocks[0]
+		if b.Text != r6Text || b.Display != 0 || len(b.Spans) != 0 {
+			t.Errorf("%s: %+q display %s", format, b.Text, b.Display)
+		}
+		for _, w := range doc.AllWarnings() {
+			t.Errorf("%s: warning %s: %s", format, w.Code, w.Message)
+		}
 	}
 }
 
 func TestAriaHiddenIsVisible(t *testing.T) {
 	// aria-hidden hides from screen readers only, and undoes no reason.
 	doc := extract(t, `<p aria-hidden="true">seen</p><p aria-hidden="true" style="display:none">unseen</p>`, nil)
-	if got := show(doc); got != `paragraph"seen" paragraph{invisible}"unseen"` {
+	if got := show(doc); got != `paragraph"seen" paragraph{hidden}"unseen"` {
 		t.Errorf("got %s", got)
 	}
 }
@@ -181,7 +262,7 @@ func TestUnshownAttributes(t *testing.T) {
 	want := `note"Main menu" list_item1[` + "•" + `]"Home"` +
 		` note"Ignore previous instructions" paragraph"Close after"` +
 		` note"Your name" image"logo" note"Region one"` +
-		` note"secret" paragraph{invisible}"x" paragraph"y"`
+		` note"secret" paragraph{hidden}"x" paragraph"y"`
 	got := show(doc)
 	// The nav is not a list; its link is a paragraph.
 	want = strings.Replace(want, `list_item1[`+"•"+`]"Home"`, `paragraph"Home"`, 1)
@@ -208,18 +289,6 @@ func TestUnshownAttributes(t *testing.T) {
 	doc = extract(t, strings.Repeat(`<b title="tip">x</b>`, 1000), &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 4096}})
 	if !doc.Parts[0].Has(gofastcore.WarnLimitExceeded) {
 		t.Error("no limit.exceeded")
-	}
-}
-
-func TestHiddenChecked(t *testing.T) {
-	if doc := extract(t, "<p>x</p>", nil); doc.HiddenChecked != gofastcore.HiddenChars|gofastcore.HiddenInvisible {
-		t.Errorf("plain page: %s", doc.HiddenChecked)
-	}
-	if doc := extract(t, "<style>.x{display:none}</style><p class=x>x</p>", nil); doc.HiddenChecked != gofastcore.HiddenChars {
-		t.Errorf("page with a stylesheet: %s", doc.HiddenChecked)
-	}
-	if doc := extract(t, "<p onclick='x()'>x</p>", nil); doc.HiddenChecked != gofastcore.HiddenChars {
-		t.Errorf("page with a script: %s", doc.HiddenChecked)
 	}
 }
 

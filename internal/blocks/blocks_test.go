@@ -28,7 +28,7 @@ func walk(t *testing.T, src string, cfg Config) *Result {
 func TestBufCollapse(t *testing.T) {
 	b := newBuf()
 	b.add([]byte("  a \n\t b  "), dom.Normal, 0, false)
-	b.add([]byte(" c"), dom.Normal, gofastcore.HiddenTiny, false)
+	b.add([]byte(" c"), dom.Normal, gofastcore.DisplayNoInk, false)
 	b.lineBreak()
 	b.add([]byte("  d\r\ne\x01"), dom.Pre, 0, false)
 	b.add([]byte("x\ny  z"), dom.PreLine, 0, false)
@@ -36,18 +36,18 @@ func TestBufCollapse(t *testing.T) {
 	if text != "a b c\n  d\nex\ny z" {
 		t.Errorf("text %q", text)
 	}
-	if h != gofastcore.HiddenTiny || len(spans) != 1 || text[spans[0].Start:spans[0].End] != "c" {
-		t.Errorf("hidden %s spans %+v", h, spans)
+	if h != gofastcore.DisplayNoInk || len(spans) != 1 || text[spans[0].Start:spans[0].End] != "c" {
+		t.Errorf("display %s spans %+v", h, spans)
 	}
 }
 
-func TestBufWholeHidden(t *testing.T) {
+func TestBufWholeDisplay(t *testing.T) {
 	b := newBuf()
-	b.add([]byte("a "), dom.Normal, gofastcore.HiddenInvisible, false)
+	b.add([]byte("a "), dom.Normal, gofastcore.DisplayHidden, false)
 	b.add([]byte(" "), dom.Normal, 0, false)
-	b.add([]byte("b"), dom.Normal, gofastcore.HiddenInvisible, false)
+	b.add([]byte("b"), dom.Normal, gofastcore.DisplayHidden, false)
 	text, h, spans := b.finish()
-	if text != "a b" || h != gofastcore.HiddenInvisible || len(spans) != 0 {
+	if text != "a b" || h != gofastcore.DisplayHidden || len(spans) != 0 {
 		t.Errorf("%q %s %+v", text, h, spans)
 	}
 }
@@ -104,8 +104,8 @@ func TestTable(t *testing.T) {
 	if len(tb.Cells) != 1 || tb.Cells[0].Href != "/x" {
 		t.Errorf("cells %+v", tb.Cells)
 	}
-	if len(tb.Hidden) != 1 || tb.Hidden[0].Row != 2 || b.Hidden != gofastcore.HiddenInvisible {
-		t.Errorf("hidden %+v %s", tb.Hidden, b.Hidden)
+	if len(tb.Display) != 1 || tb.Display[0].Row != 2 || b.Display != gofastcore.DisplayHidden {
+		t.Errorf("display %+v %s", tb.Display, b.Display)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestActiveAndMeta(t *testing.T) {
 		t.Errorf("meta %+v", r.Meta)
 	}
 	last := r.Stored[len(r.Stored)-1]
-	if last.Kind != gofastcore.KindCode || last.Attrs[gofastcore.AttrLanguage] != "json" || last.Hidden != 0 ||
+	if last.Kind != gofastcore.KindCode || last.Attrs[gofastcore.AttrLanguage] != "json" || last.Display != 0 ||
 		last.Attrs[gofastcore.AttrStored] != gofastcore.StoredMacro {
 		t.Errorf("json script %+v", last)
 	}
