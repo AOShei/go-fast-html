@@ -383,9 +383,23 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	}
 	res, err := blocks.Walk(ctx, tree.Root, blocks.Config{
 		Spans: opts.Spans, Images: opts.Images, Budget: text, Decode: decode, Source: source, Image: pc.image, Internal: pc.internal,
+		MaxDepth: e.MaxDepth,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if res.FrameDepth {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			"an iframe srcdoc document is nested at the depth limit and was not read")
+	}
+	if res.FrameFlattened && !tree.Limited {
+		part.Warn(gofastcore.SeverityWarning, WarnNestingFlattened,
+			"elements are nested deeper than the limit; below it they were read side by side")
+	}
+	if res.FrameDecode && !cut {
+		cut = true
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			"the limit on decoded bytes was reached in an iframe srcdoc document; the rest of it was not read")
 	}
 	part.Blocks = res.Blocks
 	if res.Cut {

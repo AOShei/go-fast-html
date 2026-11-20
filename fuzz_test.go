@@ -28,6 +28,7 @@ func FuzzExtract(f *testing.F) {
 		"\xFF\xFE<\x00p\x00>\x00x\x00",
 		"<select><option>a<option>b</select><input type=hidden value=v>",
 		"<svg><p>x</svg><math><mi>y</mi></math><table>z<tr><td>w</table>",
+		`<table><tr><td>a<iframe hidden id=f srcdoc="<title>t</title><p>b<iframe srcdoc='<h1>c'>">x</iframe></table>`,
 	} {
 		f.Add([]byte(s))
 	}

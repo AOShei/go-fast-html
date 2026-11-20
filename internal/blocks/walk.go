@@ -8,6 +8,7 @@ package blocks
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/dom"
@@ -26,6 +27,9 @@ type Config struct {
 	// counted as an external reference. Both are nil for a page alone.
 	Image    func(src string) (ImageRef, bool)
 	Internal func(ref string) bool
+	// MaxDepth bounds element nesting, counted through iframe srcdoc
+	// documents into the page; zero means dom.DefaultMaxDepth.
+	MaxDepth int
 }
 
 // Result is what a walk produced.
@@ -49,6 +53,11 @@ type Result struct {
 	// Stored holds what the page keeps and shows nowhere: script and
 	// style text, hidden form values. It goes to the stored part.
 	Stored []gofastcore.Block
+	// FrameDepth: an iframe srcdoc document was not read, being nested
+	// at the depth limit. FrameFlattened: one was nested deeper than the
+	// limit inside and was read side by side. FrameDecode: the decode
+	// budget ran out in a srcdoc document, which was cut there.
+	FrameDepth, FrameFlattened, FrameDecode bool
 }
 
 // MaxMeta bounds the length of one metadata value.
@@ -89,6 +98,11 @@ type walker struct {
 	inHead  bool // inside <head>
 	steps   int
 	stop    bool
+	// frame is the outermost iframe whose srcdoc document is being read,
+	// in the page's own tree; frameDepth is the nesting depth in the page
+	// of the inner document's root.
+	frame      *dom.Node
+	frameDepth int
 }
 
 // Walk produces the blocks of the tree under root.
@@ -159,7 +173,9 @@ func (w *walker) element(n *dom.Node) {
 	name := n.Name
 	switch name {
 	case "html":
-		if lang, ok := n.Attr("lang"); ok && w.res.Meta.Language == "" {
+		// A srcdoc document's language, title and meta elements are its
+		// own, not the page's metadata.
+		if lang, ok := n.Attr("lang"); ok && w.res.Meta.Language == "" && w.frame == nil {
 			if l := cleanRef(lang); len(l) <= 64 {
 				w.res.Meta.Language = l
 			}
@@ -210,7 +226,15 @@ func (w *walker) element(n *dom.Node) {
 	case "img":
 		w.image(n)
 		return
-	case "iframe", "frame", "embed":
+	case "iframe":
+		w.srcRef(n, "src")
+		if doc, ok := n.Attr("srcdoc"); ok {
+			w.softFlush()
+			w.srcdoc(n, doc)
+		}
+		w.block(n)
+		return
+	case "frame", "embed":
 		w.srcRef(n, "src")
 		w.block(n)
 		return
@@ -433,8 +457,79 @@ func (w *walker) later(b gofastcore.Block) {
 	w.pending = append(w.pending, b)
 }
 
+// srcdoc reads the document in iframe n's srcdoc attribute where n
+// stands. It is parsed as HTML and walked in the page's context, its
+// nesting counted from n's depth against MaxDepth and its bytes against
+// the decode budget. What n declares is added to every node of it; its
+// blocks are located at the page's outermost iframe.
+func (w *walker) srcdoc(n *dom.Node, doc string) {
+	limit := w.cfg.MaxDepth
+	if limit <= 0 {
+		limit = dom.DefaultMaxDepth
+	}
+	base := w.frameDepth + n.Depth()
+	if base+1 >= limit {
+		w.res.FrameDepth = true
+		return
+	}
+	if left := w.cfg.Decode.Left(); int64(len(doc)) > left {
+		cut := int(max(left, 0))
+		for cut > 0 && !utf8.RuneStart(doc[cut]) {
+			cut--
+		}
+		doc = doc[:cut]
+		w.res.FrameDecode = true
+	}
+	w.cfg.Decode.Take(int64(len(doc)))
+	if doc == "" {
+		return
+	}
+	tree, err := dom.Parse(w.ctx, []byte(doc), dom.Options{MaxDepth: limit - base})
+	if err != nil {
+		w.stop = true
+		return
+	}
+	if tree.Limited {
+		w.res.FrameFlattened = true
+	}
+	outer := n
+	if w.frame != nil {
+		outer = w.frame
+	}
+	// Add what n declares to every node and place it at the page's
+	// iframe, without recursion.
+	for c := tree.Root.FirstChild; c != nil; {
+		c.Display |= n.Display
+		c.Start, c.End = outer.Start, outer.End
+		if c.FirstChild != nil {
+			c = c.FirstChild
+			continue
+		}
+		for c != nil && c.Next == nil {
+			c = c.Parent
+			if c == tree.Root {
+				c = nil
+			}
+		}
+		if c != nil {
+			c = c.Next
+		}
+	}
+	frame, depth := w.frame, w.frameDepth
+	w.frame = outer
+	w.frameDepth = base
+	w.children(tree.Root)
+	w.softFlush()
+	w.frame, w.frameDepth = frame, depth
+}
+
 func (w *walker) loc(start, end int, anchor string) gofastcore.Location {
 	var l gofastcore.Location
+	if w.frame != nil {
+		// Inside a srcdoc document: the iframe in the page, whose
+		// offsets its nodes were given.
+		anchor = anchorOf(w.frame)
+	}
 	if start >= 0 && end > start && w.cfg.Source != nil {
 		l.Offset = w.cfg.Source(start)
 		l.Length = w.cfg.Source(end) - l.Offset

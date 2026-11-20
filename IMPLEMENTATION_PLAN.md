@@ -35,7 +35,8 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 - [x] internal/charset (tests, fuzz)
 - [x] Legacy encodings (windows-874, 1250-1258, macintosh, Shift_JIS, GBK,
       EUC-KR, Big5) and `Extractor.Charset` / `-charset`; FuzzDoubleByte.
-      Open: Big5-HKSCS, GB18030, ISO-8859-2..16, KOI8, EUC-JP and
+      Big5 with HKSCS (big5-hkscs.txt after cp950.txt, four two-code-point
+      pairs in code). Open: GB18030, ISO-8859-2..16, KOI8, EUC-JP and
       ISO-2022-JP are still read as windows-1252 with the warning.
 - [x] internal/entity (compared entry by entry with the WHATWG table by
       the orchestrator: 2,125 names and 106 legacy names, all correct)
@@ -106,8 +107,10 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 
 - Layout tables (a whole page in table cells) are emitted as one table;
   recognizing them and emitting their content as blocks is not done.
-- `iframe srcdoc` could be handed to `Options.ExtractChild` as an
-  embedded HTML document.
+- [x] `iframe srcdoc`: done (2026-11-20), in place rather than as a
+  child, since it is shown in the page; depth counted with
+  `Extractor.MaxDepth`, bytes with the decode and text budgets. Open:
+  the srcdoc document's `title`/`meta` are not read.
 - `placeholder`, `title` attributes and `area alt` are not read.
 - Tables are not split into several blocks when very long (core allows
   `Continued` pieces); only the text budget bounds them.

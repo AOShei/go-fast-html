@@ -225,8 +225,11 @@ func FuzzDoubleByte(f *testing.F) {
 				t.Fatal("invalid UTF-8")
 			}
 			prev := int64(-1)
-			for i := range string(out) {
+			for i, r := range string(out) {
 				s := m.Source(i)
+				if s == prev && enc == Big5 && (r == 0x0304 || r == 0x030C) {
+					continue // the mark of a Big5 pair shares its letter's bytes
+				}
 				if s <= prev || s >= int64(len(b)) {
 					t.Fatalf("%s: Source(%d) = %d after %d", enc, i, s, prev)
 				}

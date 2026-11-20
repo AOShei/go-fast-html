@@ -14,7 +14,7 @@ import (
 )
 
 func (w *walker) title(n *dom.Node) {
-	if w.res.Title || n.NS != dom.HTML {
+	if w.res.Title || n.NS != dom.HTML || w.frame != nil {
 		return
 	}
 	w.res.Title = true
@@ -29,6 +29,9 @@ func (w *walker) meta(n *dom.Node) {
 			w.res.External++
 		}
 		return
+	}
+	if w.frame != nil {
+		return // a srcdoc document's meta is not the page's
 	}
 	name, _ := n.Attr("name")
 	m := &w.res.Meta

@@ -25,27 +25,33 @@ var (
 	cp949Text string
 	//go:embed cp950.txt
 	cp950Text string
+	// big5-hkscs.txt lists the Big5 pairs with HKSCS that code page 950
+	// leaves undefined (gen/gen_big5_hkscs.py); it is read after
+	// cp950.txt, so code page 950 wins wherever it defines a pair.
+	//go:embed big5-hkscs.txt
+	big5HKSCSText string
 )
 
 // trailFirst is the lowest trail byte any of the four code pages uses.
 const trailFirst = 0x40
 
 type dbcs struct {
-	single [128]uint16                    // bytes 0x80-0xFF that are characters alone
-	lead   [128]*[256 - trailFirst]uint16 // by lead byte - 0x80, then trail - trailFirst
+	single [128]uint16                  // bytes 0x80-0xFF that are characters alone
+	lead   [128]*[256 - trailFirst]rune // by lead byte - 0x80, then trail - trailFirst
 }
 
 type lazyTable struct {
-	once sync.Once
-	text *string
-	t    *dbcs
+	once  sync.Once
+	text  *string
+	extra *string // read after text; fills only what text leaves undefined
+	t     *dbcs
 }
 
 var dbcsTables = map[int]*lazyTable{
 	932: {text: &cp932Text},
 	936: {text: &cp936Text},
 	949: {text: &cp949Text},
-	950: {text: &cp950Text},
+	950: {text: &cp950Text, extra: &big5HKSCSText},
 }
 
 // dbcsTable returns the parsed table of code page cp, or nil.
@@ -54,14 +60,21 @@ func dbcsTable(cp int) *dbcs {
 	if !ok {
 		return nil
 	}
-	l.once.Do(func() { l.t = parseDBCS(*l.text) })
+	l.once.Do(func() {
+		l.t = &dbcs{}
+		l.t.parse(*l.text)
+		if l.extra != nil {
+			l.t.parse(*l.extra)
+		}
+	})
 	return l.t
 }
 
-// parseDBCS reads lines of "<bytes in hex> <code point in hex>". A line
-// it cannot read is left out; the tables are this package's own.
-func parseDBCS(text string) *dbcs {
-	t := &dbcs{}
+// parse reads lines of "<bytes in hex> <code point in hex>" into t,
+// keeping what t already defines. A pair's code point may be above U+FFFF
+// (five hex digits); a single byte's is not. A line it cannot read is left
+// out; the tables are this package's own.
+func (t *dbcs) parse(text string) {
 	for line := range strings.SplitSeq(text, "\n") {
 		if line == "" || line[0] == '#' {
 			continue
@@ -72,12 +85,12 @@ func parseDBCS(text string) *dbcs {
 		}
 		k, err1 := strconv.ParseUint(key, 16, 16)
 		v, err2 := strconv.ParseUint(strings.TrimSpace(val), 16, 32)
-		if err1 != nil || err2 != nil || v == 0 || v > 0xFFFF {
+		if err1 != nil || err2 != nil || v == 0 || v > 0x10FFFF {
 			continue
 		}
 		switch len(key) {
 		case 2:
-			if k >= 0x80 {
+			if k >= 0x80 && v <= 0xFFFF && t.single[k-0x80] == 0 {
 				t.single[k-0x80] = uint16(v)
 			}
 		case 4:
@@ -87,13 +100,14 @@ func parseDBCS(text string) *dbcs {
 			}
 			arr := t.lead[lead-0x80]
 			if arr == nil {
-				arr = new([256 - trailFirst]uint16)
+				arr = new([256 - trailFirst]rune)
 				t.lead[lead-0x80] = arr
 			}
-			arr[trail-trailFirst] = uint16(v)
+			if arr[trail-trailFirst] == 0 {
+				arr[trail-trailFirst] = rune(v)
+			}
 		}
 	}
-	return t
 }
 
 // pair returns the character of a lead and trail byte, or 0.
@@ -102,7 +116,37 @@ func (t *dbcs) pair(lead, trail byte) rune {
 		return 0
 	}
 	if arr := t.lead[lead-0x80]; arr != nil {
-		return rune(arr[trail-trailFirst])
+		return arr[trail-trailFirst]
 	}
 	return 0
+}
+
+// big5Pair returns the letter and combining mark of the four Big5 HKSCS
+// pairs that decode to two code points, as the Encoding standard's Big5
+// decoder gives them, or 0, 0.
+func big5Pair(lead, trail byte) (rune, rune) {
+	if lead != 0x88 {
+		return 0, 0
+	}
+	switch trail {
+	case 0x62:
+		return 0x00CA, 0x0304
+	case 0x64:
+		return 0x00CA, 0x030C
+	case 0xA3:
+		return 0x00EA, 0x0304
+	case 0xA5:
+		return 0x00EA, 0x030C
+	}
+	return 0, 0
+}
+
+// markAt returns the combining mark that follows the character decodeAt
+// gives for src[s:] in enc, or 0: only the four Big5 pairs have one.
+func markAt(src []byte, s int, enc Encoding) rune {
+	if enc != Big5 || s+1 >= len(src) {
+		return 0
+	}
+	_, mark := big5Pair(src[s], src[s+1])
+	return mark
 }
