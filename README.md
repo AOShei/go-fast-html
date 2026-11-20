@@ -17,12 +17,12 @@ The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directorie
 | Flag | Effect in Markdown and text |
 |---|---|
 | `-furniture` | include running headers and footers |
-| `-stored` | include the stored part (data the file keeps but shows nowhere) |
+| `-stored[=kinds]` | include stored data (data the file keeps but shows nowhere): all of it (`-stored`, `=true`, `=all`), or with `=kinds` (comma or `+`) only those kinds, wherever they are; `=false` or `=` turn it off. The kinds are core's `gofastcore.StoredKindNames` (such as `markup_comment`, `macro`, `form_field`) and this library's `manifest_item` and `stylesheet`; any other name is an error listing them (exit status 2) |
 | `-part-markers` | put a line before each part saying which part it is |
 | `-children` (default true) | include embedded documents (an EPUB's documents beside its chapters), each after a line naming it (`[child 1: name]` in text); `-children=false` leaves them out |
 | `-exclude-display[=reasons]` | leave out what the file declares not displayed: all of it (alone, `=true` or `=all`), or only the reasons named (`=hidden`, `=no_ink`, `=hidden,no_ink`); `=false` or `=` is off, and any other value is an error |
 
-This library produces no running headers and footers itself; `-furniture` is there for the documents other extractors may return as children. Its stored part holds scripts, styles, `<input type=hidden>` values and EPUB images no chapter shows.
+This library produces no running headers and footers itself; `-furniture` is there for the documents other extractors may return as children. Its stored part holds scripts, styles, `<input type=hidden>` values and EPUB images no chapter shows; markup comments are stored data too, kept where they stand. `-stored=markup_comment` shows the comments alone (Outlook's conditional comments, for example), `-stored=macro` the scripts, `-stored=stylesheet` the styles.
 
 **Status:** see `IMPLEMENTATION_PLAN.md`.
 
@@ -44,7 +44,7 @@ Markdown (`internal/md`) is parsed with the block and inline structure of Common
 
 GitHub Flavored Markdown extensions read: tables; strikethrough (`~~a~~` or `~a~`, a `strike` span); task-list items (`- [ ]`, `- [x]`: the marker is taken out of the text and the item has `Attrs["checked"]` `"false"` or `"true"`; an HTML list item that begins with a checkbox gets the same); extended autolinks (bare `www.`, `http://` and `https://` addresses, `www.` ones linked as `http://`). Not read: footnotes and the disallowed-raw-HTML filter (raw HTML is read as a page's is). Front matter is not recognized.
 
-The document is rendered to HTML as a CommonMark renderer does and read by the HTML path above, so the blocks come out as in the table below (emphasis markers are gone; a link is a link span; code is declared code, verbatim, with the fence's language). Raw HTML in Markdown is read exactly as in a page: its declarations give the same display reasons, and an HTML comment is a `note` of type `comment`. `Loc.Offset` and `Loc.Length` are into the Markdown source: the lines of the Markdown block a block came from, and for raw HTML the exact bytes of its element.
+The document is rendered to HTML as a CommonMark renderer does and read by the HTML path above, so the blocks come out as in the table below (emphasis markers are gone; a link is a link span; code is declared code, verbatim, with the fence's language). Raw HTML in Markdown is read exactly as in a page: its declarations give the same display reasons, and an HTML comment is a `note` marked `Attrs["stored"]` `markup_comment`. `Loc.Offset` and `Loc.Length` are into the Markdown source: the lines of the Markdown block a block came from, and for raw HTML the exact bytes of its element.
 
 Encoding: a byte order mark, else UTF-8 if valid, else windows-1252.
 
@@ -84,7 +84,7 @@ One part of kind `body`, numbered 1. Every block has `Loc.Offset` and `Loc.Lengt
 | `hr` (and a Markdown thematic break, `---`, `***`, `___`) | `thematic_break`, no text, with the display reasons of the element; inside a table cell only a line break in the cell's text |
 | `select` | `note` of type `choices`, the options a line each, `Attrs["field"]` its name |
 | `textarea`, `input` with a value | `paragraph` with `Attrs["field"]` the control's name; the value of `<input type=hidden>` goes to the `stored` part with `Attrs["stored"]` `form_field` |
-| `<!-- comment -->` | `note` of type `comment`, after the block it stands in; no display reason |
+| `<!-- comment -->` | `note` with `Attrs["stored"]` `markup_comment` and no note type, after the block it stands in; no display reason; left out of rendered text unless `RenderOptions.Stored` or `StoredKinds` asks for it (also in raw HTML in Markdown and in EPUB chapters) |
 | `script`, `style` | in the `stored` part as `code` (language `javascript`, `json` or `css`), verbatim, read as data and never run, with `Attrs["stored"]` `macro` (core's `StoredMacro`) for a script and `stylesheet` for a style element; no display reason |
 | `template` | read as text where it stands, with the reason `hidden` (its content is inert by the element's definition) |
 | `noscript`, `noembed`, `noframes`, `iframe` fallback, closed `details`/`dialog`, `rp` | read as text where they stand; no display reason |
@@ -121,7 +121,7 @@ The same rules apply to raw HTML in Markdown and to every EPUB chapter.
 
 **Not reported, no reason:** `noscript` (shown under a condition), closed `details` and `dialog` (shown on interaction), `rp`, and `aria-hidden` (which concerns assistive technology; it neither adds a reason nor removes one).
 
-**Kept where they are, with no reason:** comments and attribute text are `note` blocks; script and style text and `<input type=hidden>` values are in the `stored` part, which the renderers leave out unless `RenderOptions.Stored` is set. A comment or attribute inside a hidden element still has no reason.
+**Kept where they are, with no reason:** comments and attribute text are `note` blocks; a comment is stored data (`Attrs["stored"]` `markup_comment`), as are script and style text and `<input type=hidden>` values in the `stored` part, all left out by the renderers unless `RenderOptions.Stored` is set or `RenderOptions.StoredKinds` names their kind. A comment or attribute inside a hidden element still has no reason.
 
 **Characters are kept.** Zero-width characters, Unicode tag characters, bidirectional controls and variation selectors stay in the text as written, with no reason and no warning.
 
