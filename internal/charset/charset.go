@@ -371,6 +371,11 @@ func dbcsAt(src []byte, s int, cp int) (rune, int, bool) {
 		if r := t.single[b-0x80]; r != 0 {
 			return rune(r), 1, false
 		}
+		if cp == 932 && b == 0x80 {
+			// The Encoding standard's Shift_JIS decoder reads 0x80 as
+			// U+0080.
+			return 0x80, 1, false
+		}
 		return utf8.RuneError, 1, true
 	}
 	if s+1 >= len(src) {
@@ -380,10 +385,33 @@ func dbcsAt(src []byte, s int, cp int) (rune, int, bool) {
 	if r := t.pair(b, trail); r != 0 {
 		return r, 2, false
 	}
+	if r := userDefined(cp, b, trail); r != 0 {
+		return r, 2, false
+	}
 	if trail < 0x80 {
 		return utf8.RuneError, 1, true
 	}
 	return utf8.RuneError, 2, true
+}
+
+// userDefined returns the Private Use Area character the Encoding
+// standard gives a lead and trail byte in a user-defined area that the
+// code page tables leave out, or 0.
+func userDefined(cp int, lead, trail byte) rune {
+	switch cp {
+	case 932:
+		// Shift_JIS pointers 8836 to 10715: lead bytes 0xF0 to 0xF9,
+		// trail bytes 0x40 to 0x7E and 0x80 to 0xFC, to U+E000 onwards.
+		if lead < 0xF0 || lead > 0xF9 || trail < 0x40 || trail == 0x7F || trail > 0xFC {
+			return 0
+		}
+		off := 0x40
+		if trail > 0x7F {
+			off = 0x41
+		}
+		return 0xE000 + rune(lead-0xF0)*188 + rune(int(trail)-off)
+	}
+	return 0
 }
 
 // isLead reports whether b is a lead byte of double-byte code page cp.
