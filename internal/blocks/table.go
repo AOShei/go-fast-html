@@ -93,6 +93,12 @@ func (w *walker) table(n *dom.Node) {
 			if rs == 0 || rs > len(rows)-r {
 				rs = len(rows) - r
 			}
+			// A grid wider than the budget can hold one row of is cut
+			// here, before the columns are made (spans make it cheap).
+			if int64(c+cs)*gofastcore.CellCost > w.cfg.Budget.Left()-gofastcore.BlockCost {
+				w.res.Cut, w.stop = true, true
+				return
+			}
 			for len(busy) < c+cs {
 				busy = append(busy, 0)
 			}

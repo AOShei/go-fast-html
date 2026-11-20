@@ -320,10 +320,12 @@ func (p *parser) table(b *block) {
 	}
 	b.kind = kTable
 	b.rows = append(b.rows, head)
+	// A short row is not padded here: padding a narrow row to a wide
+	// header costs nothing in the source and much in memory. The table
+	// reader pads the grid within the cell budget; RenderSpec pads.
 	for _, l := range lines[2:] {
 		row := cells(l)
-		row = append(row, make([]string, max(0, len(head)-len(row)))...)
-		b.rows = append(b.rows, row[:len(head)])
+		b.rows = append(b.rows, row[:min(len(row), len(head))])
 	}
 }
 

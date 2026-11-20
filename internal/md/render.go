@@ -210,6 +210,11 @@ func (r *renderer) block(b *block, tight bool) {
 				r.inline(c)
 				r.o.B = append(r.o.B, "</"+cell+">"...)
 			}
+			if r.spec {
+				for range len(b.rows[0]) - len(row) {
+					r.o.B = append(r.o.B, "<td></td>"...)
+				}
+			}
 			if r.full() {
 				break
 			}

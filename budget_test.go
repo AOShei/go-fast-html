@@ -2,6 +2,7 @@ package gofasthtml
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -37,6 +38,57 @@ func TestTableBudget(t *testing.T) {
 	rows := len(p.Blocks[0].Table.Rows)
 	if rows == 0 || rows*1000*gofastcore.CellCost > 1<<20 {
 		t.Errorf("%d rows kept", rows)
+	}
+}
+
+// allocated runs f and returns the bytes it allocated.
+func allocated(f func()) uint64 {
+	var a, b runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&a)
+	f()
+	runtime.ReadMemStats(&b)
+	return b.TotalAlloc - a.TotalAlloc
+}
+
+// A GFM header of 5000 columns over 5000 one-cell rows (35 KB) pads to
+// 25 million cells. The padding must be bounded by the cell budget before
+// it is made, not after.
+func TestMarkdownWideTable(t *testing.T) {
+	src := "|" + strings.Repeat("a|", 5000) + "\n|" + strings.Repeat("-|", 5000) + "\n" + strings.Repeat("|x\n", 5000)
+	var doc *gofastcore.Document
+	n := allocated(func() {
+		doc = extractAs(t, "md", src, &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 8 << 20}})
+	})
+	if n > 256<<20 {
+		t.Errorf("%d MiB allocated", n>>20)
+	}
+	p := doc.Parts[0]
+	if !p.Has(gofastcore.WarnLimitExceeded) {
+		t.Error("no limit.exceeded")
+	}
+	tb := p.Blocks[0].Table
+	if tb == nil || len(tb.Rows[0]) != 5000 || len(tb.Rows) < 2 || tb.Rows[1][0] != "x" || tb.Rows[1][1] != "" {
+		t.Fatalf("table %v", p.Blocks[0].Kind)
+	}
+	if len(tb.Rows)*5000*gofastcore.CellCost > 8<<20 {
+		t.Errorf("%d rows kept", len(tb.Rows))
+	}
+}
+
+// One row of 50,000 cells each spanning 1000 columns declares 50 million
+// columns in 600 KB; the width is bounded by the cell budget as it grows.
+func TestTableWideSpans(t *testing.T) {
+	src := "<table><tr>" + strings.Repeat("<td colspan=1000>x", 50000) + strings.Repeat("<tr><td>y", 1000)
+	var doc *gofastcore.Document
+	n := allocated(func() {
+		doc = extract(t, src, &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 8 << 20}})
+	})
+	if n > 256<<20 {
+		t.Errorf("%d MiB allocated", n>>20)
+	}
+	if !doc.Parts[0].Has(gofastcore.WarnLimitExceeded) {
+		t.Error("no limit.exceeded")
 	}
 }
 
