@@ -8,3 +8,5 @@
 - The `hidden` attribute on the EPUB 3 navigation document's `nav` and `ol` elements is now reported like any other declaration (the exemption is removed).
 - Invisible characters are no longer scanned for or reported; they stay in the text.
 - Command: `-exclude-hidden` is replaced by `-exclude-display[=hidden,no_ink]`.
+- Command: `-furniture`, `-stored` and `-part-markers` added, the render flags shared by every go-fast command; `-exclude-display`'s help text matches theirs, and its error for an unknown reason names only `hidden, no_ink`.
+- `template` content as `hidden` is decided (Andrew, 2026-11-20).

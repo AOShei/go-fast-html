@@ -14,7 +14,7 @@ Branch `declared-not-judged` (from `f5ec78f`, on `review-1`), local only, not pu
 - inline `visibility: hidden` or `collapse`, inherited, and undone by `visibility: visible` inside;
 - the SVG presentation attribute `display="none"`;
 - the SVG presentation attribute `visibility="hidden"` (or `collapse`), undone by `visible` inside;
-- the content of `template` (inert by the element's definition). **To confirm, Andrew.**
+- the content of `template` (inert by the element's definition). Decided by Andrew, 2026-11-20.
 
 `no_ink`:
 - inline `opacity: 0` exactly;
@@ -60,9 +60,14 @@ Allocations unchanged (html 16,309, md 2,876, epub 63,662 per op). The library h
 
 ## 7. For Andrew
 
-- **`template` gets `hidden`**, as the handoff recommends. Confirm.
 - **SVG `visibility` in the `collapse` form** is treated like `hidden`, as CSS does.
 - **`opacity: 0` is not undone inside** (CSS opacity composes), and `color` alpha 0 is undone by a declared colour inside (colour inherits). Both follow CSS.
 - **The command flag is renamed** `-exclude-display` with no alias for `-exclude-hidden`. An alias could be kept if scripts use the old one.
 - **The `select` choices note** keeps its element's reason (the options are displayed content, not a comment or attribute).
 - The "before" numbers were taken by checking out `f5ec78f` in the repository itself; a worktree in `.worktrees/html-before` could not reach the corpus because environment variables and symlinks were refused. The worktree was created and removed.
+
+## Follow-up decisions (2026-11-20)
+
+- **Shared command flags** (COMMAND_FLAGS.md): `cmd/gofasthtml` gains `-furniture`, `-stored` and `-part-markers` with the table's help text, and `-exclude-display`'s help text now matches it. One `RenderOptions` with all four renders every document the command prints, an EPUB's included. Commit `6a5d151`.
+- **`-exclude-display` error**: the reasons are listed from `DisplayHidden | DisplayNoInk`, so `=bogus` and `=unknown` now say "the reasons are hidden, no_ink" (before: "hidden, no_ink, unknown"). The command test covers alone, `=true`, `=all`, `=hidden`, `=no_ink`, `=hidden,no_ink`, `=hidden+no_ink`, `=false`, `=`, `=unknown` and `=bogus`. Commit `6a5d151`. go-fast-email's copy has the same line to fix.
+- **`template` content is `hidden`**: confirmed as it was; no code change. README, IMPLEMENTATION_PLAN.md and CHANGELOG record it as decided, and it is off the list for Andrew. Documentation in the commit after `6a5d151`.

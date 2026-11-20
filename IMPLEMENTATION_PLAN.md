@@ -80,11 +80,14 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 - [x] Pin core 05bbddb; `Display` (`hidden`, `no_ink`), `Part.Finish`
 - [x] Report only declarations: the hidden attribute, inline display,
       visibility, opacity 0, colour alpha 0, SVG display/visibility
-      attributes, template content (template: to be confirmed by Andrew)
+      attributes, template content (template: decided by Andrew, 2026-11-20)
 - [x] Removed: the size, contrast, position and clipping checks and
       their parsers; the out-of-proportion rule; HiddenChecked; two
       warnings; the EPUB navigation exemption (details in CHANGELOG.md)
 - [x] Command: `-exclude-hidden` replaced by `-exclude-display`
+- [x] Command: the shared render flags of COMMAND_FLAGS.md
+      (`-furniture`, `-stored`, `-part-markers`), and the
+      `-exclude-display` help text and error aligned with it (2026-11-20)
 - [x] Tests: each declaration, one former inferred case per removed
       check, characters kept (HTML, Markdown, plain text, EPUB)
 

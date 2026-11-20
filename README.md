@@ -12,7 +12,16 @@ fmt.Print(doc.Markdown())
 
 `Source.Format` is `html`, `md`, `txt` or `epub`. `Extractor.Format` sets the format; when it is empty, `Detect` decides it from `Options.Name` (`.html`, `.htm`, `.xhtml`, `.shtml`; `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`; `.txt`, `.text`; `.epub`) and, failing that, from the content: a zip archive whose `mimetype` member comes first and says `application/epub+zip` is EPUB, input that begins with markup, or has a tag of a common HTML element in its first 4 KiB, is HTML, and anything else plain text. Markdown is never guessed from content, since reading plain text as Markdown takes characters out of it.
 
-The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directories and standard input (`-`); `-as html|md|txt` sets the format, `-exclude-display[=hidden,no_ink]` leaves text the file declares not displayed out of Markdown and text output (JSON always has everything).
+The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directories and standard input (`-`); `-as html|md|txt` sets the format. It offers the render flags every go-fast command shares; they affect Markdown and text only, for the document and an EPUB's documents alike, and JSON always has everything:
+
+| Flag | Effect in Markdown and text |
+|---|---|
+| `-furniture` | include running headers and footers |
+| `-stored` | include the stored part (data the file keeps but shows nowhere) |
+| `-part-markers` | put a line before each part saying which part it is |
+| `-exclude-display[=reasons]` | leave out what the file declares not displayed: all of it (alone, `=true` or `=all`), or only the reasons named (`=hidden`, `=no_ink`, `=hidden,no_ink`); `=false` or `=` is off, and any other value is an error |
+
+This library produces no running headers and footers and no stored part itself; the flags are there for the documents other extractors may return as children.
 
 **Status:** see `IMPLEMENTATION_PLAN.md`.
 
@@ -96,7 +105,7 @@ Everything is extracted; nothing is dropped. Where the page itself declares that
 - inline `visibility: hidden` or `collapse`, inherited, and undone by `visibility: visible` inside;
 - the SVG presentation attribute `display="none"`;
 - the SVG presentation attribute `visibility="hidden"` (or `collapse`), undone by `visible` inside;
-- the content of `template`, which is inert by the element's definition.
+- the content of `template`, which is inert by the element's definition (decided by Andrew, 2026-11-20).
 
 `no_ink` is reported for:
 
