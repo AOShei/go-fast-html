@@ -78,6 +78,9 @@ type Node struct {
 	open  bool
 }
 
+// Depth returns how deeply the node is nested in its tree.
+func (n *Node) Depth() int { return int(n.depth) }
+
 // Attr returns the value of the named attribute and whether it is
 // present.
 func (n *Node) Attr(name string) (string, bool) {

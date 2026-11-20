@@ -107,8 +107,10 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 
 - Layout tables (a whole page in table cells) are emitted as one table;
   recognizing them and emitting their content as blocks is not done.
-- `iframe srcdoc` could be handed to `Options.ExtractChild` as an
-  embedded HTML document.
+- [x] `iframe srcdoc`: done (2026-11-20), in place rather than as a
+  child, since it is shown in the page; depth counted with
+  `Extractor.MaxDepth`, bytes with the decode and text budgets. Open:
+  the srcdoc document's `title`/`meta` are not read.
 - `placeholder`, `title` attributes and `area alt` are not read.
 - Tables are not split into several blocks when very long (core allows
   `Continued` pieces); only the text budget bounds them.

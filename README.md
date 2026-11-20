@@ -88,6 +88,7 @@ One part of kind `body`, numbered 1. Every block has `Loc.Offset` and `Loc.Lengt
 | `script`, `style` | in the `stored` part as `code` (language `javascript`, `json` or `css`), verbatim, read as data and never run, with `Attrs["stored"]` `macro` (core's `StoredMacro`) for a script and `stylesheet` for a style element; no display reason |
 | `template` | read as text where it stands, with the reason `hidden` (its content is inert by the element's definition) |
 | `noscript`, `noembed`, `noframes`, `iframe` fallback, closed `details`/`dialog`, `rp` | read as text where they stand; no display reason |
+| `iframe srcdoc` | the document in the attribute is parsed as HTML and its blocks come where the iframe stands, before any fallback text; `Loc` is the (outermost) iframe element in the page; what the iframe declares (`hidden`, inline `display:none`, ...) is added to all of it, what the inner document declares applies inside; its `title`, `meta` and `lang` are not the page's metadata and are not read. Its elements count from the iframe's depth against `Extractor.MaxDepth`: a srcdoc document whose iframe is at the limit is not read (`limit.exceeded`). Its bytes count against the decode budget (cut with `limit.exceeded`) and its text against the text budget. An iframe with only `src` is as before. |
 | `<title>` | `Metadata.Title` |
 | `<meta name=author>` | `Metadata.Authors`, one entry each, not split |
 | `<meta name=keywords>` | `Metadata.Keywords`, one entry, not split |
@@ -159,7 +160,7 @@ Block quotes and lists in Markdown nest at most 100 deep (`md.MaxNest`); a marke
 
 ## Not read
 
-Stylesheets and scripts (not evaluated); `aria-labelledby`/`aria-describedby` references (not resolved); `srcset`; `iframe srcdoc` (not extracted as an embedded document); CSS generated content; `<base href>` (addresses are as written); layout tables are tables. In Markdown: the GFM extensions other than tables, and front matter, as above.
+Stylesheets and scripts (not evaluated); `aria-labelledby`/`aria-describedby` references (not resolved); `srcset`; the `title` and `meta` of an `iframe srcdoc` document; CSS generated content; `<base href>` (addresses are as written); layout tables are tables. In Markdown: the GFM extensions other than tables, and front matter, as above.
 
 ## Licence
 
