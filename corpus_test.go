@@ -108,8 +108,15 @@ func TestCorpus(t *testing.T) {
 						t.Errorf("%s/%s: %s fails Validate", set, format, name)
 					}
 				}
-				for _, w := range doc.AllWarnings() {
+				for p, w := range doc.AllWarnings() {
 					c.add(c.warnings, w.Code)
+					if set == "dev" && w.Severity != gofastcore.SeverityInfo {
+						n := 0
+						if p != nil {
+							n = p.Number
+						}
+						t.Logf("warn dev/%s/%s part %d %s: %s", format, name, n, w.Code, w.Message)
+					}
 				}
 				for p, b := range doc.AllBlocks() {
 					if b.Hidden == 0 {

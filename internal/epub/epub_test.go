@@ -30,6 +30,17 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// A navPoint that closes inside its text element must not leave the
+// text element pointing at no entry.
+func TestNCXUnbalanced(t *testing.T) {
+	for _, src := range []string{
+		`<ncx><navMap><navPoint><text>A</navPoint></text></navMap></ncx>`,
+		`<ncx><navPoint><text></navPoint>x</text><text>y</text></ncx>`,
+	} {
+		NCX("toc.ncx", []byte(src))
+	}
+}
+
 func TestNCXAndNav(t *testing.T) {
 	ncx := NCX("OPS/toc.ncx", []byte(`<ncx><navMap><navPoint><navLabel><text>A</text></navLabel><content src="a.html"/>
 <navPoint><navLabel><text>B</text></navLabel><content src="sub/b.html#f"/></navPoint></navPoint>
