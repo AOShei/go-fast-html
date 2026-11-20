@@ -28,7 +28,8 @@ func corpusDir() string {
 type corpusTally struct {
 	files, panics, timeouts, invalid int
 	errors                           map[string]int
-	hidden                           map[string]int
+	hidden                           map[string]int // blocks by reason
+	hiddenFiles                      map[string]int // files with a block of that reason
 	warnings                         map[string]int
 }
 
@@ -72,7 +73,7 @@ func TestCorpus(t *testing.T) {
 			if err != nil {
 				continue
 			}
-			c := corpusTally{errors: map[string]int{}, hidden: map[string]int{}, warnings: map[string]int{}}
+			c := corpusTally{errors: map[string]int{}, hidden: map[string]int{}, hiddenFiles: map[string]int{}, warnings: map[string]int{}}
 			for _, ent := range ents {
 				if ent.IsDir() {
 					continue
@@ -118,11 +119,16 @@ func TestCorpus(t *testing.T) {
 						t.Logf("warn dev/%s/%s part %d %s: %s", format, name, n, w.Code, w.Message)
 					}
 				}
+				seen := map[string]bool{}
 				for p, b := range doc.AllBlocks() {
 					if b.Hidden == 0 {
 						continue
 					}
 					c.add(c.hidden, b.Hidden.String())
+					if !seen[b.Hidden.String()] {
+						seen[b.Hidden.String()] = true
+						c.add(c.hiddenFiles, b.Hidden.String())
+					}
 					if set == "dev" {
 						ex := []rune(b.Text)
 						if len(ex) > 60 {
@@ -132,8 +138,8 @@ func TestCorpus(t *testing.T) {
 					}
 				}
 			}
-			t.Logf("%-7s %-4s files=%d errors{%s} invalid=%d panics=%d timeouts=%d hidden{%s} warnings{%s}",
-				set, format, c.files, keys(c.errors), c.invalid, c.panics, c.timeouts, keys(c.hidden), keys(c.warnings))
+			t.Logf("%-7s %-4s files=%d errors{%s} invalid=%d panics=%d timeouts=%d blocks{%s} files{%s} warnings{%s}",
+				set, format, c.files, keys(c.errors), c.invalid, c.panics, c.timeouts, keys(c.hidden), keys(c.hiddenFiles), keys(c.warnings))
 		}
 	}
 }
