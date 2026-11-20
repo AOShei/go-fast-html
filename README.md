@@ -12,7 +12,7 @@ fmt.Print(doc.Markdown())
 
 `Source.Format` is `html`, `md`, `txt` or `epub`. `Extractor.Format` sets the format; when it is empty, `Detect` decides it from `Options.Name` (`.html`, `.htm`, `.xhtml`, `.shtml`; `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`; `.txt`, `.text`; `.epub`) and, failing that, from the content: a zip archive whose `mimetype` member comes first and says `application/epub+zip` is EPUB, input that begins with markup, or has a tag of a common HTML element in its first 4 KiB, is HTML, and anything else plain text. Markdown is never guessed from content, since reading plain text as Markdown takes characters out of it.
 
-The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directories and standard input (`-`); `-as html|md|txt` sets the format, `-exclude-hidden` leaves hidden text out of Markdown and text output.
+The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directories and standard input (`-`); `-as html|md|txt` sets the format, `-exclude-display[=hidden,no_ink]` leaves text the file declares not displayed out of Markdown and text output (JSON always has everything).
 
 **Status:** see `IMPLEMENTATION_PLAN.md`.
 
@@ -32,13 +32,13 @@ Markdown (`internal/md`) is parsed with the block and inline structure of Common
 
 GitHub Flavored Markdown extensions read: tables; strikethrough (`~~a~~` or `~a~`, a `strike` span); task-list items (`- [ ]`, `- [x]`: the marker is taken out of the text and the item has `Attrs["checked"]` `"false"` or `"true"`; an HTML list item that begins with a checkbox gets the same); extended autolinks (bare `www.`, `http://` and `https://` addresses, `www.` ones linked as `http://`). Not read: footnotes and the disallowed-raw-HTML filter (raw HTML is read as a page's is). Front matter is not recognized.
 
-The document is rendered to HTML as a CommonMark renderer does and read by the HTML path above, so the blocks come out as in the table below (emphasis markers are gone; a link is a link span; code is declared code, verbatim, with the fence's language). Raw HTML in Markdown is read exactly as in a page: it gets the same hidden-text checks, and an HTML comment is a flagged `note`. `Loc.Offset` and `Loc.Length` are into the Markdown source: the lines of the Markdown block a block came from, and for raw HTML the exact bytes of its element.
+The document is rendered to HTML as a CommonMark renderer does and read by the HTML path above, so the blocks come out as in the table below (emphasis markers are gone; a link is a link span; code is declared code, verbatim, with the fence's language). Raw HTML in Markdown is read exactly as in a page: its declarations give the same display reasons, and an HTML comment is a `note` of type `comment`. `Loc.Offset` and `Loc.Length` are into the Markdown source: the lines of the Markdown block a block came from, and for raw HTML the exact bytes of its element.
 
 Encoding: a byte order mark, else UTF-8 if valid, else windows-1252.
 
 ### Plain text
 
-Plain text is decoded as Markdown is, and split into `paragraph` blocks at blank lines and form feeds. Line breaks inside a paragraph are kept as `\n`: a text file does not say whether its lines are wrapped prose or lines that mean something (an address, a verse, a list), and keeping them loses nothing. Trailing white space on each line and control characters other than tab are dropped. `Loc` gives each paragraph's byte range. `HiddenChecked` is `invisible_chars` only.
+Plain text is decoded as Markdown is, and split into `paragraph` blocks at blank lines and form feeds. Line breaks inside a paragraph are kept as `\n`: a text file does not say whether its lines are wrapped prose or lines that mean something (an address, a verse, a list), and keeping them loses nothing. Trailing white space on each line and control characters other than tab are dropped. `Loc` gives each paragraph's byte range. Plain text declares nothing about display, so no block has a display reason.
 
 ### EPUB
 
@@ -48,9 +48,9 @@ EPUB 2 and 3 publications (`Source.Format` `epub`, `.epub` or a zip whose first 
 - **Metadata.** `dc:title` (the first) to `Title`; each `dc:creator` to `Authors`; `dc:language` to `Language`; each `dc:subject` to `Keywords`; `dc:date` to `Created` when it parses as ISO 8601, and as written to `Extra["date"]`; `meta property="dcterms:modified"` to `Modified`; `dc:description`, `dc:publisher`, `dc:contributor`, `dc:rights`, `dc:source`, `dc:type`, `dc:format`, `dc:relation`, `dc:coverage` to `Extra` under their names; the identifiers to `Extra["identifier"]`, one a line, the package's unique identifier first; the package version to `Extra["epub_version"]`.
 - **Chapters.** One `chapter` part per spine item, numbered by its place in the spine, read by the HTML path in XHTML mode (a self-closing tag is an empty element; the XML declaration is not a comment). `Loc` offsets are into that chapter's file. `Part.Name` is the chapter's first entry in the table of contents, else its `<title>`. An item with `linear="no"` is extracted in its place and carries `epub.non_linear` (info). Images a chapter shows are resolved in the archive: `Image.ID` is the member's path, `MIME` the manifest's media type, and with `ImagesData` the bytes. References to members of the archive are not counted as external. `Options.Parts` selects chapters; `Limits.MaxParts` (default 100,000) bounds them.
 - **Navigation.** The EPUB 3 navigation document (`nav` with `epub:type="toc"`), else the EPUB 2 NCX, becomes `Outline`: title, nesting level and the number of the chapter it points to (0 when it points outside the spine). Titles count against the text budget before the first chapter.
-- **The rest of the manifest**, with the whole document only (`Options.Parts` unset): images no chapter shows go to the `stored` part (after the chapters' scripts and styles), not flagged, as `image` blocks with `Attrs["stored"]` `manifest_item` and `Attrs["name"]` the member path (a cover image has the text `cover`); stylesheets are skipped; every other item (documents outside the spine, fonts, audio, scripts) is handed to `Options.ExtractChild` and listed in `Children`. Scripts count as active content.
+- **The rest of the manifest**, with the whole document only (`Options.Parts` unset): images no chapter shows go to the `stored` part (after the chapters' scripts and styles), with no display reason, as `image` blocks with `Attrs["stored"]` `manifest_item` and `Attrs["name"]` the member path (a cover image has the text `cover`); stylesheets are skipped; every other item (documents outside the spine, fonts, audio, scripts) is handed to `Options.ExtractChild` and listed in `Children`. Scripts count as active content.
 - **Encryption.** Resources `META-INF/encryption.xml` lists, font obfuscation (IDPF and Adobe) aside, are not read: an encrypted chapter is a part with `part.failed` and `epub.encrypted`, an encrypted embedded file a child with `child.encrypted`, and the document carries `epub.encrypted` with the count. When every selected chapter is encrypted (DRM), nothing usable is left and the result is `ErrUnsupported`.
-- **Hidden text** is checked in each chapter as in a page; `invisible` is listed in `HiddenChecked` only if no chapter has a stylesheet or a script, which in practice is rare.
+- **Display.** Each chapter's declarations give display reasons as in a page. That includes the navigation document when it is in the spine: the `hidden` attribute EPUB 3 puts on its `nav` and `ol` elements (landmarks, page list, deeper levels of the table of contents) is a declaration, and those blocks get `hidden`.
 
 ## How HTML maps
 
@@ -69,12 +69,13 @@ One part of kind `body`, numbered 1. Every block has `Loc.Offset` and `Loc.Lengt
 | `a href` | a link span, with `Options.Spans` |
 | `b`, `strong`, `i`, `em`, `u`, `s`, `del`, `code`, `kbd`, `sub`, `sup`, ... | style spans, with `Options.Spans` |
 | `br` | `\n` in the text |
-| `hr` (and a Markdown thematic break, `---`, `***`, `___`) | `thematic_break`, no text, with the hidden reasons of the element; inside a table cell only a line break in the cell's text |
+| `hr` (and a Markdown thematic break, `---`, `***`, `___`) | `thematic_break`, no text, with the display reasons of the element; inside a table cell only a line break in the cell's text |
 | `select` | `note` of type `choices`, the options a line each, `Attrs["field"]` its name |
 | `textarea`, `input` with a value | `paragraph` with `Attrs["field"]` the control's name; the value of `<input type=hidden>` goes to the `stored` part with `Attrs["stored"]` `form_field` |
-| `<!-- comment -->` | `note` of type `comment`, after the block it stands in; not flagged unless an outlier (below) |
-| `script`, `style` | in the `stored` part as `code` (language `javascript`, `json` or `css`), verbatim, read as data and never run, with `Attrs["stored"]` `macro` (core's `StoredMacro`) for a script and `stylesheet` for a style element; not flagged |
-| `template`, `noscript`, `noembed`, `noframes`, `iframe` fallback, closed `details`/`dialog`, `rp` | read as text where they stand; not flagged |
+| `<!-- comment -->` | `note` of type `comment`, after the block it stands in; no display reason |
+| `script`, `style` | in the `stored` part as `code` (language `javascript`, `json` or `css`), verbatim, read as data and never run, with `Attrs["stored"]` `macro` (core's `StoredMacro`) for a script and `stylesheet` for a style element; no display reason |
+| `template` | read as text where it stands, with the reason `hidden` (its content is inert by the element's definition) |
+| `noscript`, `noembed`, `noframes`, `iframe` fallback, closed `details`/`dialog`, `rp` | read as text where they stand; no display reason |
 | `<title>` | `Metadata.Title` |
 | `<meta name=author>` | `Metadata.Authors`, one entry each, not split |
 | `<meta name=keywords>` | `Metadata.Keywords`, one entry, not split |
@@ -84,31 +85,35 @@ One part of kind `body`, numbered 1. Every block has `Loc.Offset` and `Loc.Lengt
 
 Outside `pre` (and `white-space: pre` in inline style), white space is collapsed as CSS `white-space: normal` does. Ligatures U+FB00–U+FB06 are written as their letters everywhere but in code.
 
-## Hidden text
+## What the file declares
 
-Hidden text is extracted and flagged, never dropped. Only the `style` attribute and the document's own attributes are read: **stylesheets (`<style>` and linked ones) and scripts are not evaluated**, so text a stylesheet or a script hides is not flagged.
+Everything is extracted; nothing is dropped. Where the page itself declares that text is not displayed, or is drawn with no ink, the block (or the span, or the table cells) carries that reason in `Display`, following the page's own inheritance as CSS does. Only the element's attributes and its `style` attribute are read: **stylesheets (`<style>` and linked ones) and scripts are not evaluated**.
 
-| Reason | When |
-|---|---|
-| `invisible` | the `hidden` attribute (unless inline style gives another `display`); `display: none`; `visibility: hidden` or `collapse` (undone by `visible` inside); an outlier among unshown items (below) |
-| `tiny` | an inline `font-size` (or `font`) under 2 points, relative sizes multiplied through |
-| `transparent` | `opacity` of 0.01 or less; `color: transparent` or a color with alpha 0 |
-| `low_contrast` | an inline or `<font color>` text color against the nearest inline `background`/`bgcolor`, white if none, by core's `LowContrast` |
-| `off_page` | `left`, `top`, `margin-left`, `margin-top` or `text-indent` of -999 pixels or less |
-| `clipped` | `clip: rect(...)` that shows nothing, `clip-path: inset(50%)`, or a width or height of 1 pixel or less with overflow hidden |
-| `invisible_chars` | core's scan |
+`hidden` is reported for:
 
-**`aria-hidden="true"` is not a reason.** It hides content from screen readers, not from sighted readers, so its text is visible content; it neither adds a reason nor removes one.
+- the `hidden` attribute, including `hidden="until-found"` (unless inline style gives another `display`);
+- inline `display: none`;
+- inline `visibility: hidden` or `collapse`, inherited, and undone by `visibility: visible` inside;
+- the SVG presentation attribute `display="none"`;
+- the SVG presentation attribute `visibility="hidden"` (or `collapse`), undone by `visible` inside;
+- the content of `template`, which is inert by the element's definition.
 
-**EPUB navigation.** When the navigation document is in the spine, the `hidden` attribute on its `nav` and `ol` elements is not a reason: EPUB 3 provides it to keep the landmarks, the page list or deeper levels of the table of contents out of view, and books routinely use it. Other hidden content in the navigation document is flagged as anywhere else.
+`no_ink` is reported for:
 
-**What is flagged, and what is not.** The flag is a signal for text hidden by a mechanism applied to content that would otherwise be seen (go-fast-core's "What earns a flag"): the `hidden` attribute, `display: none`, `visibility: hidden`, tiny, transparent, low-contrast, off-page or clipped text, invisible characters. What pages routinely keep and never show is extracted and bounded but **not** flagged, since nearly every clean page has some: comments, the attribute text below, script and style text, `noscript`/`template`/`noembed`/`noframes`/`iframe` fallback, closed `details` and `dialog`, `rp`, hidden form values. A clean, ordinary page comes out with no flag. Such an item is flagged `invisible` only when it is out of proportion for its kind by go-fast-core's shared rule (`gofastcore.UnshownOutlier`): more than 30 words, like a comment or tooltip holding a paragraph of instructions, or more than 300 characters other than white space, which catches text written without spaces (Chinese, Japanese) and encoded payloads such as base64; the part then carries `text.unshown_outlier` saying how many. Two kinds are exempt. Script and style text is routinely long and never an outlier. A hidden form value that is one unbroken token (no white space), such as an ASP.NET `__VIEWSTATE` or a CSRF or SAML token, is routinely long machine data and is exempt from the character rule (the word rule cannot trip on one token); a hidden form value with white space in it is held to the whole rule. The `stored` part is not hidden as a whole, and the renderers leave it out unless `RenderOptions.Stored` is set.
+- inline `opacity: 0` exactly;
+- inline `color: transparent`, or a colour whose alpha is exactly 0 (undone by another colour inside).
 
-**Unshown attributes.** Text a page stores in attributes and does not show is extracted (not flagged, but for outliers): `aria-label`, `aria-description`, `aria-roledescription`, `aria-placeholder`, `title` and `placeholder` on any element, and `alt` on an image map's `area`. Each becomes a `note` block with `Attrs` `type: attribute` and `attribute: <name>`, at the element's place (before the block the element is in, when that block has no text yet), with `Loc` the byte range of the attribute's value. A value that only repeats the element's visible text, or an image's alt text, after white space is collapsed, is left out. `aria-labelledby` and `aria-describedby` are not followed: the elements they name are read where they stand, flagged as their own visibility says.
+The same rules apply to raw HTML in Markdown and to every EPUB chapter.
 
-**Visually hidden text through stylesheets is not detected.** The common "screen-reader only" pattern (a class such as `sr-only` or `visually-hidden` whose stylesheet rule clips the text to one pixel or moves it off screen) is not flagged, because stylesheets are not evaluated. The same forms written in inline `style` are: `clip`/`clip-path` that shows nothing, a width or height of 1 pixel or less with overflow hidden (`clipped`), and a large negative offset (`off_page`).
+**The boundary.** Colour, size, position and overlap are not judged. Nothing compares two values or applies a threshold: a text colour equal to its background, a font size of 0 or 1 pixel, a large negative offset, clipping, `opacity: 0.01` or a colour with alpha 0.01 give no reason. A rule in a stylesheet that hides a class gives no reason either, since stylesheets are not evaluated. A block with no `Display` value says nothing about whether a reader can see it.
 
-`Document.HiddenChecked` lists `invisible_chars`, and `invisible` too when the document has no stylesheet and no script: then inline style and attributes are all that decides what is displayed. The other reasons are never listed: their checks are partial (sizes from stylesheets, nested `small`, background images, positioning by other means).
+**Not reported, no reason:** `noscript` (shown under a condition), closed `details` and `dialog` (shown on interaction), `rp`, and `aria-hidden` (which concerns assistive technology; it neither adds a reason nor removes one).
+
+**Kept where they are, with no reason:** comments and attribute text are `note` blocks; script and style text and `<input type=hidden>` values are in the `stored` part, which the renderers leave out unless `RenderOptions.Stored` is set. A comment or attribute inside a hidden element still has no reason.
+
+**Characters are kept.** Zero-width characters, Unicode tag characters, bidirectional controls and variation selectors stay in the text as written, with no reason and no warning.
+
+**Attribute text.** Text a page keeps in attributes without drawing it in the flow of the page is extracted: `aria-label`, `aria-description`, `aria-roledescription`, `aria-placeholder`, `title` and `placeholder` on any element, and `alt` on an image map's `area`. Each becomes a `note` block with `Attrs` `type: attribute` and `attribute: <name>`, at the element's place (before the block the element is in, when that block has no text yet), with `Loc` the byte range of the attribute's value. A value that only repeats the element's own text, or an image's alt text, after white space is collapsed, is left out, since that text is extracted already. `aria-labelledby` and `aria-describedby` are not followed: the elements they name are read where they stand, with the reasons their own declarations give.
 
 ## Warnings
 
@@ -116,15 +121,13 @@ Hidden text is extracted and flagged, never dropped. Only the `style` attribute 
 |---|---|---|
 | `input.active_content` | info | scripts, `on...` event attributes, `javascript:` addresses |
 | `input.external_reference` | warning | resources loaded from elsewhere: pictures, scripts, stylesheets, frames, embedded objects, media, a refresh to another address, a form's target; nothing is fetched |
-| `text.hidden` | warning | hidden text; the blocks say why. On the document: invisible characters in metadata |
 | `text.unmapped_glyphs` | warning | bytes not valid in the encoding read, shown as U+FFFD |
 | `image.unsupported_encoding` | warning | with `ImagesData`, a `data:` image that could not be decoded |
 | `part.no_text`, `part.image_only` | warning | the body has no text |
 | `limit.exceeded` | error | a limit cut the body off |
 | `html.charset_unsupported` | warning | a declared encoding that is not decoded; read as windows-1252 |
-| `html.nesting_flattened` | warning | elements nested deeper than `Extractor.MaxDepth` (default 512), or more than 4096 open at once; below that their text is read side by side, with the reasons it is hidden kept |
+| `html.nesting_flattened` | warning | elements nested deeper than `Extractor.MaxDepth` (default 512), or more than 4096 open at once; below that their text is read side by side, with their display reasons kept |
 | `html.metadata_truncated` | info | a metadata value over 64 KiB, or more than 256 authors or keyword declarations |
-| `text.unshown_outlier` | warning | items of unshown text (comments, attribute text, hidden form values) hold more than 30 words or more than 300 characters other than white space; they are flagged `invisible` |
 | `input.repaired`, `input.ambiguous` | warning | EPUB: the archive's directory was unreadable, or a member name occurs twice |
 | `epub.non_linear` | info | the chapter is `linear="no"` in the spine |
 | `epub.encrypted` | error | resources are encrypted (DRM) and were not read |

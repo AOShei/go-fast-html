@@ -3,8 +3,8 @@
 Module `github.com/AOShei/go-fast-html`, package `gofasthtml`. Extracts
 HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 `Loc.Offset`/`Length` are byte offsets into the source; `Loc.Anchor` from
-`id`). go-fast-core pinned at commit 031432a
-(`v0.0.0-20261119191115-031432aa57b0`).
+`id`). go-fast-core pinned at commit 05bbddb, schema 0.2
+(`v0.0.0-20261120081927-05bbddb16b9f`).
 
 ## Layout
 
@@ -14,9 +14,9 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 | `internal/charset` | Encoding sniffing (BOM, `<meta>` prescan, UTF-8 validity, windows-1252) and decoding to UTF-8 with a map from decoded offsets back to source offsets |
 | `internal/entity` | WHATWG named character references (`entities.txt`, embedded) and the numeric-reference rules; `gen.go` regenerates the table from `entities.json` |
 | `internal/lexer` | HTML5 tokenizer (WHATWG section 13.2.5): data, RCDATA, RAWTEXT, script data (with escaped states), PLAINTEXT, tags, attributes, comments, bogus comments, DOCTYPE, CDATA in foreign content, character references |
-| `internal/dom` | Tree builder for tag soup: implied end tags, misnested formatting (simplified adoption agency), active formatting reconstruction, foster parenting, foreign content breakout, a nesting depth limit; per-node effective hidden state from inline style |
-| `internal/css` | Inline `style` declarations that matter: display, visibility, font-size, opacity, color/background, white-space, position offsets |
-| `internal/blocks` | Walk the tree and emit core blocks, with whitespace collapsing, spans, hidden ranges, tables, lists, budget |
+| `internal/dom` | Tree builder for tag soup: implied end tags, misnested formatting (simplified adoption agency), active formatting reconstruction, foster parenting, foreign content breakout, a nesting depth limit; per-node declared display reasons (hidden attribute, template, SVG display/visibility attributes, inline style) |
+| `internal/css` | Inline `style` declarations that matter: display, visibility, opacity, the alpha of color, white-space |
+| `internal/blocks` | Walk the tree and emit core blocks, with whitespace collapsing, spans, display ranges, tables, lists, budget |
 | `internal/md` | CommonMark parser rendering to HTML with a map back to Markdown offsets |
 | `text.go` | Plain text paragraphs |
 | `cmd/gofasthtml` | CLI printing JSON, Markdown or text |
@@ -39,7 +39,7 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 - [x] internal/dom (tests, fuzz, depth/stack bounds)
 - [x] internal/css (tests, fuzz)
 - [x] internal/blocks + public API (`extract.go`, `doc.go`)
-- [x] Tests: structure, hidden, metadata, locations, charset, spans,
+- [x] Tests: structure, display, metadata, locations, charset, spans,
       warnings, images, errors, budgets, worst cases, FuzzExtract with
       Validate, source hygiene, imports
 - [x] README, NOTICE
@@ -61,7 +61,8 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 - [x] `aria-hidden` no longer a hidden reason (user decision 2026-11-20)
 - [x] Unshown attribute text (aria-label, aria-description,
       aria-roledescription, aria-placeholder, title, placeholder, area
-      alt) as `note` blocks of type `attribute`, flagged invisible
+      alt) as `note` blocks of type `attribute` (no display reason since
+      the declared-not-judged change)
 - [x] `KindThematicBreak` for `<hr>` and Markdown breaks; core pinned at
       df335f0
 - [x] EPUB 2/3 (`epub.go`, `internal/epub`): zip with member limit and
@@ -74,10 +75,23 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 - [ ] Core proposals: a note type for attribute text, a stored value for
       manifest items (both are library-local strings today)
 
+## Declared, not judged (core 0.2)
+
+- [x] Pin core 05bbddb; `Display` (`hidden`, `no_ink`), `Part.Finish`
+- [x] Report only declarations: the hidden attribute, inline display,
+      visibility, opacity 0, colour alpha 0, SVG display/visibility
+      attributes, template content (template: to be confirmed by Andrew)
+- [x] Removed: the size, contrast, position and clipping checks and
+      their parsers; the out-of-proportion rule; HiddenChecked; two
+      warnings; the EPUB navigation exemption (details in CHANGELOG.md)
+- [x] Command: `-exclude-hidden` replaced by `-exclude-display`
+- [x] Tests: each declaration, one former inferred case per removed
+      check, characters kept (HTML, Markdown, plain text, EPUB)
+
 ## Open items from phase 1
 
 - Layout tables (a whole page in table cells) are emitted as one table;
-  detecting them and emitting their content as blocks is not done.
+  recognizing them and emitting their content as blocks is not done.
 - `iframe srcdoc` could be handed to `Options.ExtractChild` as an
   embedded HTML document.
 - `placeholder`, `title` attributes and `area alt` are not read.
