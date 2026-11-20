@@ -28,3 +28,28 @@ func TestShiftJISUserDefined(t *testing.T) {
 		}
 	}
 }
+
+// The WHATWG gbk decoder (the gb18030 decoder) reads GBK's three
+// user-defined areas as the Private Use Area, as GB 18030 maps them:
+// 0xAAA1-0xAFFE to U+E000-U+E233, 0xF8A1-0xFEFE to U+E234-U+E4C5, and
+// 0xA140-0xA7A0 to U+E4C6-U+E765. Code page 936's table leaves them out.
+func TestGBKUserDefined(t *testing.T) {
+	for _, c := range []struct{ src, want string }{
+		{"\xAA\xA1", r(0xE000)},
+		{"\xAA\xFE\xAB\xA1", r(0xE05D, 0xE05E)},
+		{"\xAF\xFE", r(0xE233)},
+		{"\xF8\xA1", r(0xE234)},
+		{"\xFE\xFE", r(0xE4C5)},
+		{"\xA1\x40", r(0xE4C6)},
+		{"\xA1\x7E\xA1\x80", r(0xE504, 0xE505)},
+		{"\xA1\xA0\xA2\x40", r(0xE525, 0xE526)},
+		{"\xA7\xA0", r(0xE765)},
+		{"\xA1\x7F", r(0xFFFD, 0x7F)},
+		{"\xA1\xA1", r(0x3000)}, // GB 2312 proper is unchanged
+	} {
+		out, _, _, _ := Decode([]byte(c.src), Result{Enc: GBK}, math.MaxInt64)
+		if string(out) != c.want {
+			t.Errorf("%q: got %+q, want %+q", c.src, out, c.want)
+		}
+	}
+}

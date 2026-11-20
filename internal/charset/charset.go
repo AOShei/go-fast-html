@@ -410,6 +410,21 @@ func userDefined(cp int, lead, trail byte) rune {
 			off = 0x41
 		}
 		return 0xE000 + rune(lead-0xF0)*188 + rune(int(trail)-off)
+	case 936:
+		// GBK's user-defined areas, as GB 18030 and the Encoding
+		// standard's index-gb18030 map them.
+		switch {
+		case lead >= 0xAA && lead <= 0xAF && trail >= 0xA1 && trail <= 0xFE:
+			return 0xE000 + rune(lead-0xAA)*94 + rune(trail-0xA1)
+		case lead >= 0xF8 && lead <= 0xFE && trail >= 0xA1 && trail <= 0xFE:
+			return 0xE234 + rune(lead-0xF8)*94 + rune(trail-0xA1)
+		case lead >= 0xA1 && lead <= 0xA7 && trail >= 0x40 && trail <= 0xA0 && trail != 0x7F:
+			off := rune(trail - 0x40)
+			if trail > 0x7F {
+				off--
+			}
+			return 0xE4C6 + rune(lead-0xA1)*96 + off
+		}
 	}
 	return 0
 }
