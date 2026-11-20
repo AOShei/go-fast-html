@@ -103,6 +103,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		furniture   = flags.Bool("furniture", false, "in Markdown and text, include running headers and footers")
 		stored      = flags.Bool("stored", false, "in Markdown and text, include the stored part (data the file keeps but shows nowhere)")
 		partMarkers = flags.Bool("part-markers", false, "in Markdown and text, put a line before each part saying which part it is")
+		children    = flags.Bool("children", true, "in Markdown and text, include embedded documents (attachments, members), each after a line naming it; -children=false leaves them out")
 		version     = flags.Bool("version", false, "print the version and exit")
 	)
 	var exclude displayFlag
@@ -165,7 +166,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	extractor := &gofasthtml.Extractor{Format: *as, MaxDepth: *maxDepth, MaxArchiveMembers: *members}
 	// A document an EPUB holds besides its chapters is read too if it is
 	// one of the formats of this library, decided by its name and content.
-	children := &gofasthtml.Extractor{MaxDepth: *maxDepth, MaxArchiveMembers: *members}
+	epubs := &gofasthtml.Extractor{MaxDepth: *maxDepth, MaxArchiveMembers: *members}
 	opts.Child = func(ctx context.Context, name, mime string, r io.ReaderAt, size int64, o *gofastcore.Options) (*gofastcore.Document, error) {
 		switch mime {
 		case "application/xhtml+xml", "text/html":
@@ -175,7 +176,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		case "text/plain":
 			return (&gofasthtml.Extractor{Format: "txt"}).Extract(ctx, r, size, o)
 		case "application/epub+zip":
-			return children.Extract(ctx, r, size, o)
+			return epubs.Extract(ctx, r, size, o)
 		}
 		return nil, gofastcore.ErrUnsupported
 	}
@@ -230,12 +231,14 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	w := bufio.NewWriter(out)
 	defer w.Flush()
 	// The same options render every document this command prints, an
-	// EPUB's included.
+	// EPUB's included; with Children core renders each embedded document
+	// after a line naming it, with these same options.
 	render := &gofastcore.RenderOptions{
 		Furniture:      *furniture,
 		Stored:         *stored,
 		PartMarkers:    *partMarkers,
 		ExcludeDisplay: exclude.reasons,
+		Children:       *children,
 	}
 
 	written := 0

@@ -66,9 +66,25 @@ func TestCommandEPUB(t *testing.T) {
 	if lines := strings.Split(strings.TrimSpace(out), "\n"); len(lines) < 4 || !strings.HasPrefix(lines[0], "[") || !strings.Contains(out, "first chapter") || !strings.Contains(out, "second chapter") {
 		t.Errorf("-part-markers: %q", out)
 	}
-	out, _, _ = cli(t, "", "-format", "text", p)
+	out, _, _ = cli(t, "", "-format", "text", "-children=false", p)
 	if strings.Contains(out, "[") {
 		t.Errorf("markers without -part-markers: %q", out)
+	}
+
+	// -children (default true): the document beside the spine follows the
+	// chapters after a line naming it; -children=false leaves both out.
+	out, _, _ = cli(t, "", "-format", "text", p)
+	if !strings.Contains(out, "[child 1: x.xhtml]") || !strings.Contains(out, "beside the spine") ||
+		strings.Index(out, "[child 1: x.xhtml]") > strings.Index(out, "beside the spine") {
+		t.Errorf("children by default: %q", out)
+	}
+	out, _, _ = cli(t, "", "-format", "text", "-children=false", p)
+	if strings.Contains(out, "[child") || strings.Contains(out, "beside the spine") || !strings.Contains(out, "second chapter") {
+		t.Errorf("-children=false: %q", out)
+	}
+	out, _, _ = cli(t, "", "-format", "markdown", p)
+	if !strings.Contains(out, "beside the spine") {
+		t.Errorf("children in Markdown: %q", out)
 	}
 }
 
