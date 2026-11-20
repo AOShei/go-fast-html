@@ -21,7 +21,7 @@ The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directorie
 | `-part-markers` | put a line before each part saying which part it is |
 | `-exclude-display[=reasons]` | leave out what the file declares not displayed: all of it (alone, `=true` or `=all`), or only the reasons named (`=hidden`, `=no_ink`, `=hidden,no_ink`); `=false` or `=` is off, and any other value is an error |
 
-This library produces no running headers and footers and no stored part itself; the flags are there for the documents other extractors may return as children.
+This library produces no running headers and footers itself; `-furniture` is there for the documents other extractors may return as children. Its stored part holds scripts, styles, `<input type=hidden>` values and EPUB images no chapter shows.
 
 **Status:** see `IMPLEMENTATION_PLAN.md`.
 

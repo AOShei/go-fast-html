@@ -125,6 +125,18 @@ func TestCommand(t *testing.T) {
 		t.Errorf("stderr %q", errs)
 	}
 
+	// The stored part (here a hidden input's value) only with -stored.
+	stored := filepath.Join(t.TempDir(), "form.html")
+	if err := os.WriteFile(stored, []byte(`<p>Hi</p><form><input type="hidden" name="tok" value="kept-value"></form>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, _ := cli(t, "", "-format", "text", stored); strings.Contains(out, "kept-value") {
+		t.Errorf("stored part rendered without -stored: %q", out)
+	}
+	if out, _, _ := cli(t, "", "-format", "text", "-stored", stored); !strings.Contains(out, "kept-value") {
+		t.Errorf("-stored: %q", out)
+	}
+
 	// Text declared not displayed left out of rendered text on request.
 	for _, flag := range []string{"-exclude-display", "-exclude-display=hidden"} {
 		out, _, _ = cli(t, "", "-format", "text", flag, filepath.Join(dir, "a.html"))
