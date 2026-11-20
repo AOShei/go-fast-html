@@ -50,8 +50,9 @@ const (
 //	                          data: image could not be decoded
 const (
 	// WarnCharsetUnsupported: the document declares a character encoding
-	// this library does not decode. It was read as windows-1252, so
-	// letters outside ASCII may be wrong.
+	// this library does not decode, and was read as windows-1252, so
+	// letters outside ASCII may be wrong; or Extractor.Charset names one,
+	// and it was ignored.
 	WarnCharsetUnsupported = "html.charset_unsupported"
 	// WarnNestingFlattened: elements are nested deeper than the limit.
 	// Below it, elements were placed beside each other instead of inside
@@ -76,6 +77,15 @@ type Extractor struct {
 	// MaxArchiveMembers bounds the number of files in an EPUB's archive.
 	// Zero means DefaultMaxArchiveMembers; negative means no limit.
 	MaxArchiveMembers int
+	// Charset is the character encoding the input comes with from outside
+	// it, as a label such as the charset parameter of a MIME Content-Type
+	// gives it ("windows-1251", "shift_jis"): the transport-layer encoding
+	// of the WHATWG encoding sniffing. It applies to HTML, Markdown and
+	// plain text, not to the chapters of an EPUB. A byte order mark
+	// overrides it; it overrides a <meta> declaration and detection. A
+	// label that names no encoding this library decodes is ignored, with
+	// the warning html.charset_unsupported. Empty means none.
+	Charset string
 }
 
 var _ gofastcore.Extractor = (*Extractor)(nil)
@@ -236,7 +246,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	}
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}
-	res, err := e.page(ctx, src, format, pageConfig{opts: opts, text: text, decode: decode}, &part, t)
+	res, err := e.page(ctx, src, format, pageConfig{opts: opts, text: text, decode: decode, charset: e.Charset}, &part, t)
 	if err != nil {
 		return nil, err
 	}
@@ -259,11 +269,16 @@ type tally struct {
 	active, external int
 	metaCut          bool
 	charsets         []string           // declared encodings not decoded
+	transport        string             // Extractor.Charset, when not decoded
 	stored           []gofastcore.Block // for the stored part
 }
 
 // finish adds the document's warnings.
 func (t *tally) finish(doc *gofastcore.Document) {
+	if t.transport != "" {
+		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
+			fmt.Sprintf("the encoding %q was given with the input and is not decoded; it was ignored", t.transport))
+	}
 	for _, c := range t.charsets {
 		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
 			fmt.Sprintf("the document declares the encoding %q, which is not decoded; it was read as windows-1252", c))
@@ -292,6 +307,8 @@ type pageConfig struct {
 	// the archive.
 	image    func(src string) (blocks.ImageRef, bool)
 	internal func(ref string) bool
+	// charset is the caller's transport-layer encoding label.
+	charset string
 }
 
 // page reads one document, an HTML page, Markdown or plain text, or a
@@ -300,9 +317,12 @@ type pageConfig struct {
 // walk, nil for plain text.
 func (e *Extractor) page(ctx context.Context, src []byte, format string, pc pageConfig, part *gofastcore.Part, t *tally) (*blocks.Result, error) {
 	opts, text, decode := pc.opts, pc.text, pc.decode
-	enc := charset.SniffText(src)
+	enc := charset.SniffText(src, pc.charset)
 	if format == "html" {
-		enc = charset.Sniff(src)
+		enc = charset.Sniff(src, pc.charset)
+	}
+	if enc.Transport != "" {
+		t.transport = blocksLabel(enc.Transport)
 	}
 	if enc.Unsupported {
 		t.charsets = append(t.charsets, blocksLabel(enc.Declared))
