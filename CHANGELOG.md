@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased: core d4cd8e2
+
+- go-fast-core pinned at `d4cd8e2`: `Validate` now rejects an inferred
+  `thematic_break`; this library emits only declared ones and passes.
+
 ## Unreleased: declared, not judged (breaking)
 
 - go-fast-core pinned at 05bbddb, schema `0.2`. `Hidden` is now `Display`, with the reasons `hidden` and `no_ink`; JSON key `display`.

@@ -3,8 +3,8 @@
 Module `github.com/AOShei/go-fast-html`, package `gofasthtml`. Extracts
 HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 `Loc.Offset`/`Length` are byte offsets into the source; `Loc.Anchor` from
-`id`). go-fast-core pinned at commit ebecf3c, schema 0.2
-(`v0.0.0-20261120130045-ebecf3cf2089`).
+`id`). go-fast-core pinned at commit d4cd8e2, schema 0.2
+(`v0.0.0-20261120143830-d4cd8e285190`).
 
 ## Layout
 
