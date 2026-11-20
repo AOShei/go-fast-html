@@ -638,10 +638,12 @@ func (w *walker) comment(n *dom.Node) {
 	if text == "" {
 		return
 	}
-	// A comment is markup, not content the page displays or declares
-	// anything about: it has no display reason.
+	// A markup comment is stored data: the page keeps it and shows it
+	// nowhere. It stays where it stands, as a note marked
+	// stored=markup_comment, with no note type (core's NoteComment is a
+	// reviewer's comment, which is displayed) and no display reason.
 	w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: text,
-		Attrs: map[string]string{gofastcore.AttrNoteType: gofastcore.NoteComment},
+		Attrs: map[string]string{gofastcore.AttrStored: gofastcore.StoredMarkupComment},
 		Loc:   w.loc(n.Start, n.End, "")})
 }
 
