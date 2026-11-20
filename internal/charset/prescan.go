@@ -212,4 +212,16 @@ func isSpace(c byte) bool {
 
 func isLetter(c byte) bool { return c|0x20 >= 'a' && c|0x20 <= 'z' }
 
-func lower(b []byte) string { return string(bytes.ToLower(b)) }
+// lower lowercases the ASCII letters of b only, as the HTML and Encoding
+// standards match names and labels: Unicode lowercasing would make
+// U+212A KELVIN SIGN a k.
+func lower(b []byte) string {
+	out := make([]byte, len(b))
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		out[i] = c
+	}
+	return string(out)
+}

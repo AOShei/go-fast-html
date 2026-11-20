@@ -53,3 +53,27 @@ func TestGBKUserDefined(t *testing.T) {
 		}
 	}
 }
+
+// Labels match ASCII case-insensitively only, as the Encoding standard
+// says: KELVIN SIGN (U+212A) and LATIN CAPITAL LETTER I WITH DOT ABOVE
+// (U+0130) are not the letters k and i, though Unicode lowercases them so.
+func TestLabelASCIICase(t *testing.T) {
+	for _, l := range []string{r(0x212A) + "orean", "sh" + r(0x130) + "ft_jis", "B" + r(0x130) + "G5"} {
+		if e, ok := Lookup(l); ok {
+			t.Errorf("Lookup(%+q) = %s", l, e)
+		}
+		if res := Sniff([]byte("<p>x"), l); res.From == FromTransport {
+			t.Errorf("Sniff(transport %+q) = %+v", l, res)
+		}
+		meta := []byte(`<meta charset="` + l + `"><p>x`)
+		if res := Sniff(meta, ""); !res.Unsupported {
+			t.Errorf("Sniff(meta %+q) = %+v", l, res)
+		}
+	}
+	if e, ok := Lookup(" SHIFT_JIS\t"); !ok || e != ShiftJIS {
+		t.Errorf("Lookup(SHIFT_JIS) = %s, %v", e, ok)
+	}
+	if res := Sniff([]byte("<p>x"), ` "Big5" `); res.Enc != Big5 {
+		t.Errorf("Sniff(transport Big5) = %+v", res)
+	}
+}

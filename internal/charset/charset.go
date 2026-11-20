@@ -139,7 +139,7 @@ func transport(label string) (Encoding, bool, string) {
 		return 0, false, ""
 	}
 	// A MIME parameter may come with its quotes.
-	l := string(bytes.ToLower(bytes.Trim([]byte(label), "\t\n\f\r \"'")))
+	l := lower(bytes.Trim([]byte(label), "\t\n\f\r \"'"))
 	if e, ok := labels[l]; ok {
 		return e, true, ""
 	}
@@ -270,7 +270,7 @@ var labels = map[string]Encoding{
 // Lookup returns the encoding a label names, if it is one decoded here.
 // The label is matched after trimming ASCII whitespace and lowercasing.
 func Lookup(label string) (Encoding, bool) {
-	e, ok := labels[string(bytes.ToLower(bytes.Trim([]byte(label), "\t\n\f\r ")))]
+	e, ok := labels[lower(bytes.Trim([]byte(label), "\t\n\f\r "))]
 	return e, ok
 }
 
