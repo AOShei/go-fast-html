@@ -139,7 +139,7 @@ func transport(label string) (Encoding, bool, string) {
 		return 0, false, ""
 	}
 	// A MIME parameter may come with its quotes.
-	l := string(bytes.ToLower(bytes.Trim([]byte(label), "\t\n\f\r \"'")))
+	l := lower(bytes.Trim([]byte(label), "\t\n\f\r \"'"))
 	if e, ok := labels[l]; ok {
 		return e, true, ""
 	}
@@ -270,7 +270,7 @@ var labels = map[string]Encoding{
 // Lookup returns the encoding a label names, if it is one decoded here.
 // The label is matched after trimming ASCII whitespace and lowercasing.
 func Lookup(label string) (Encoding, bool) {
-	e, ok := labels[string(bytes.ToLower(bytes.Trim([]byte(label), "\t\n\f\r ")))]
+	e, ok := labels[lower(bytes.Trim([]byte(label), "\t\n\f\r "))]
 	return e, ok
 }
 
@@ -371,6 +371,11 @@ func dbcsAt(src []byte, s int, cp int) (rune, int, bool) {
 		if r := t.single[b-0x80]; r != 0 {
 			return rune(r), 1, false
 		}
+		if cp == 932 && b == 0x80 {
+			// The Encoding standard's Shift_JIS decoder reads 0x80 as
+			// U+0080.
+			return 0x80, 1, false
+		}
 		return utf8.RuneError, 1, true
 	}
 	if s+1 >= len(src) {
@@ -380,10 +385,48 @@ func dbcsAt(src []byte, s int, cp int) (rune, int, bool) {
 	if r := t.pair(b, trail); r != 0 {
 		return r, 2, false
 	}
+	if r := userDefined(cp, b, trail); r != 0 {
+		return r, 2, false
+	}
 	if trail < 0x80 {
 		return utf8.RuneError, 1, true
 	}
 	return utf8.RuneError, 2, true
+}
+
+// userDefined returns the Private Use Area character the Encoding
+// standard gives a lead and trail byte in a user-defined area that the
+// code page tables leave out, or 0.
+func userDefined(cp int, lead, trail byte) rune {
+	switch cp {
+	case 932:
+		// Shift_JIS pointers 8836 to 10715: lead bytes 0xF0 to 0xF9,
+		// trail bytes 0x40 to 0x7E and 0x80 to 0xFC, to U+E000 onwards.
+		if lead < 0xF0 || lead > 0xF9 || trail < 0x40 || trail == 0x7F || trail > 0xFC {
+			return 0
+		}
+		off := 0x40
+		if trail > 0x7F {
+			off = 0x41
+		}
+		return 0xE000 + rune(lead-0xF0)*188 + rune(int(trail)-off)
+	case 936:
+		// GBK's user-defined areas, as GB 18030 and the Encoding
+		// standard's index-gb18030 map them.
+		switch {
+		case lead >= 0xAA && lead <= 0xAF && trail >= 0xA1 && trail <= 0xFE:
+			return 0xE000 + rune(lead-0xAA)*94 + rune(trail-0xA1)
+		case lead >= 0xF8 && lead <= 0xFE && trail >= 0xA1 && trail <= 0xFE:
+			return 0xE234 + rune(lead-0xF8)*94 + rune(trail-0xA1)
+		case lead >= 0xA1 && lead <= 0xA7 && trail >= 0x40 && trail <= 0xA0 && trail != 0x7F:
+			off := rune(trail - 0x40)
+			if trail > 0x7F {
+				off--
+			}
+			return 0xE4C6 + rune(lead-0xA1)*96 + off
+		}
+	}
+	return 0
 }
 
 // isLead reports whether b is a lead byte of double-byte code page cp.
