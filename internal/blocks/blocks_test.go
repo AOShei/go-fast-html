@@ -55,7 +55,8 @@ func TestBufWholeHidden(t *testing.T) {
 func TestVerbatim(t *testing.T) {
 	b := newBuf()
 	b.add([]byte(" \xEF\xAC\x81\t\x00x \n"), dom.Pre, 0, true)
-	if got, _, _ := b.verbatimText(); got != " \xEF\xAC\x81\tx \n" {
+	// The final line ending is dropped; the rest is as it stands.
+	if got, _, _ := b.verbatimText(); got != " \xEF\xAC\x81\tx " {
 		t.Errorf("%q", got)
 	}
 }

@@ -32,6 +32,7 @@ const (
 	kHTML
 	kHR
 	kTable
+	kRefdefs // a paragraph that held only link reference definitions
 )
 
 type hline struct {
@@ -250,10 +251,15 @@ func (p *parser) incorporate(line string) {
 			p.finalize(container)
 		}
 	default:
-		if p.offset < len(p.line) && !p.blank {
+		switch {
+		case p.offset < len(p.line) && !p.blank:
 			p.addChild(kPara, p.offset)
 			p.advanceNextNonspace()
 			p.addLine()
+		case p.blank && container.kind == kQuote:
+			// A blank line inside a block quote belongs to it, and does
+			// not end what holds the quote with a blank line.
+			p.touch(container, p.lineStart+len(p.line))
 		}
 	}
 }
@@ -415,7 +421,9 @@ func (p *parser) finalize(b *block) {
 	case kPara:
 		b.content = p.takeRefdefs(b.content)
 		if strings.Trim(b.content, " \t\n") == "" {
-			remove(b)
+			// Only definitions: nothing is rendered, but the block stays
+			// so that a blank line before it still makes a list loose.
+			b.kind = kRefdefs
 		} else {
 			p.table(b)
 		}
@@ -448,16 +456,6 @@ func (p *parser) finalize(b *block) {
 		}
 	}
 	p.tip = b.parent
-}
-
-func remove(b *block) {
-	par := b.parent
-	for i, c := range par.children {
-		if c == b {
-			par.children = append(par.children[:i], par.children[i+1:]...)
-			return
-		}
-	}
 }
 
 // takeRefdefs removes the link reference definitions at the start of a
@@ -536,5 +534,8 @@ func spnl(s string, i int) int {
 // case folded (as the reference implementation does it, by lowering and
 // then raising case).
 func normLabel(s string) string {
-	return strings.ToUpper(strings.ToLower(strings.Join(strings.Fields(s), " ")))
+	// Go has no full case folding; the one fold that changes length and
+	// matters in practice, sharp s to "ss", is done by hand.
+	l := strings.ReplaceAll(strings.ToLower(strings.Join(strings.Fields(s), " ")), "ß", "ss")
+	return strings.ToUpper(l)
 }

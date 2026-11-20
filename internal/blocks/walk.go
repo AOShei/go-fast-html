@@ -536,9 +536,17 @@ func (b *buf) verbatimText() (string, gofastcore.Hidden, []gofastcore.Span) {
 	if isBlank(b.b) {
 		return "", 0, nil
 	}
+	// The line ending that ends the last line is not shown as a line of
+	// its own (a browser draws <pre>x\n</pre> as one line), and Markdown
+	// code ends with one.
+	if n := len(b.b); b.b[n-1] == '\n' {
+		b.b = b.b[:n-1]
+		b.clip()
+	}
+	text := b.b
 	var spans []gofastcore.Span
-	h := b.hiddenSpans(0, len(b.b), &spans)
-	return string(b.b), h, spans
+	h := b.hiddenSpans(0, len(text), &spans)
+	return string(text), h, spans
 }
 
 func (w *walker) script(n *dom.Node) {

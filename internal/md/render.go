@@ -42,13 +42,51 @@ type renderer struct {
 	o     *HTML
 	refs  map[string]Ref
 	limit int
+	spec  bool
 }
 
-// Render writes the document as HTML, stopping before limit bytes.
+// Render writes the document as HTML, stopping before limit bytes. Link
+// and image addresses are written as the source has them.
 func (d *Doc) Render(limit int) *HTML {
 	r := &renderer{o: &HTML{}, refs: d.refs, limit: limit}
 	r.block(d.root, false)
 	return r.o
+}
+
+// RenderSpec writes the document as the CommonMark reference renderer
+// does, with addresses percent-encoded, for comparison with the spec.
+func (d *Doc) RenderSpec() *HTML {
+	r := &renderer{o: &HTML{}, refs: d.refs, limit: 1 << 30, spec: true}
+	r.block(d.root, false)
+	return r.o
+}
+
+// encodeURI is the reference renderer's normalizeURI (mdurl.encode):
+// characters outside the URL-safe set are percent-encoded as UTF-8, and
+// a % that starts a valid escape is kept.
+func encodeURI(s string) string {
+	const safe = ";/?:@&=+$,-_.!~*'()#"
+	hex := func(c byte) bool { return strings.IndexByte("0123456789abcdefABCDEF", c) >= 0 }
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '%' && i+2 < len(s) && hex(s[i+1]) && hex(s[i+2]):
+			b.WriteByte(c)
+		case c < 0x80 && (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte(safe, c) >= 0):
+			b.WriteByte(c)
+		default:
+			b.WriteString("%" + strings.ToUpper(strconv.FormatUint(uint64(c)|0x100, 16)[1:]))
+		}
+	}
+	return b.String()
+}
+
+func (r *renderer) dest(s string) string {
+	if r.spec {
+		return encodeURI(s)
+	}
+	return s
 }
 
 func (r *renderer) full() bool {
@@ -132,8 +170,7 @@ func (r *renderer) block(b *block, tight bool) {
 			r.o.B = append(r.o.B, '"')
 		}
 		r.o.B = append(r.o.B, '>')
-		// The last line ending ends the line, and is not code.
-		r.esc(strings.TrimSuffix(b.content, "\n"), false)
+		r.esc(b.content, false)
 		r.o.B = append(r.o.B, "</code></pre>"...)
 		r.span(h, b.start, b.end)
 	case kHTML:
@@ -201,7 +238,7 @@ func (r *renderer) inline(s string) {
 			r.o.B = append(r.o.B, "<strong>"...)
 		case iLink:
 			r.o.B = append(r.o.B, `<a href="`...)
-			r.esc(n.dest, true)
+			r.esc(r.dest(n.dest), true)
 			r.o.B = append(r.o.B, '"')
 			if n.title != "" {
 				r.o.B = append(r.o.B, ` title="`...)
@@ -211,7 +248,7 @@ func (r *renderer) inline(s string) {
 			r.o.B = append(r.o.B, '>')
 		case iImage:
 			r.o.B = append(r.o.B, `<img src="`...)
-			r.esc(n.dest, true)
+			r.esc(r.dest(n.dest), true)
 			r.o.B = append(r.o.B, `" alt="`...)
 			r.esc(plain(n), true)
 			r.o.B = append(r.o.B, '"')
@@ -228,6 +265,7 @@ func (r *renderer) inline(s string) {
 			n = n.first
 			continue
 		}
+		r.close(n) // an element with nothing in it
 		for n != nil && n.next == nil {
 			n = n.parent
 			if n == nil || n == root {
