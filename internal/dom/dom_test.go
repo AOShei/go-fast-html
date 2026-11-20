@@ -63,11 +63,11 @@ func TestTree(t *testing.T) {
 		{"<span style='color:#fff'>a</span><span style='color:#fff;background:#000'>b</span>", `<span>"a"{low_contrast}</span><span>"b"</span>`},
 		{"<font color=white>a</font>", `<font>"a"{low_contrast}</font>`},
 		{"<span style='opacity:0'>a</span><span style='color:transparent'>b</span>", `<span>"a"{transparent}</span><span>"b"{transparent}</span>`},
-		{"<details><summary>s</summary>d</details>", `<details><summary>"s"</summary>"d"{invisible}</details>`},
-		{"<template>t</template><noscript>n</noscript>", `<template>"t"{invisible}</template><noscript>"n"{invisible}</noscript>`},
+		{"<details><summary>s</summary>d</details>", `<details><summary>"s"</summary>"d"</details>`},
+		{"<template>t</template><noscript>n</noscript>", `<template>"t"</template><noscript>"n"</noscript>`},
 		{"<div aria-hidden=true>a</div><div style='position:absolute;left:-10000px'>b</div>", `<div>"a"</div><div>"b"{off_page}</div>`},
 		{"<div aria-hidden=true style='display:none'>a</div><p hidden aria-hidden=false>b</p>", `<div>"a"{invisible}</div><p>"b"{invisible}</p>`},
-		{"<script>var a='<p>'</script><style>p{}</style>", `<script>"var a='<p>'"{invisible}</script><style>"p{}"{invisible}</style>`},
+		{"<script>var a='<p>'</script><style>p{}</style>", `<script>"var a='<p>'"</script><style>"p{}"</style>`},
 		{"a<!-- c -->b", `"a"<! c >"b"`},
 	} {
 		if got := tree(t, c.in); got != c.want {

@@ -3,6 +3,8 @@ package gofasthtml
 import (
 	"strings"
 	"testing"
+
+	"github.com/AOShei/go-fast-core"
 )
 
 // page is an ordinary article page with the usual furniture.
@@ -36,6 +38,73 @@ FROM sales GROUP BY region;</code></pre>
   <footer><p>&copy; 2026 Example Corp</p></footer>
 </body>
 </html>`
+
+// noFlags fails if any block of doc is flagged or any part warns
+// text.hidden.
+func noFlags(t *testing.T, doc *gofastcore.Document) {
+	t.Helper()
+	for p, b := range doc.AllBlocks() {
+		if b.Hidden != 0 {
+			t.Errorf("part %d: %s block %q flagged %s", p.Number, b.Kind, b.Text, b.Hidden)
+		}
+	}
+	for _, w := range doc.AllWarnings() {
+		if w.Code == gofastcore.WarnTextHidden || w.Code == WarnUnshownOutlier {
+			t.Errorf("warning %+v", w)
+		}
+	}
+}
+
+// A clean, ordinary page carries what pages routinely carry (scripts,
+// styles, comments, labels, tooltips, form tokens, noscript fallback,
+// a closed details) and must come out with no hidden flag.
+func TestCleanPageNotFlagged(t *testing.T) {
+	src := strings.Replace(page, "</body>", `
+  <!-- Google Tag Manager (noscript) -->
+  <noscript><p>Enable JavaScript for the full site.</p></noscript>
+  <form action="/subscribe"><input type="hidden" name="csrf" value="a1b2c3">
+    <input type="email" placeholder="you@example.com" aria-label="Email address">
+    <button title="Subscribe to the newsletter">Subscribe</button></form>
+  <details><summary>Methodology</summary><p>Figures are unaudited.</p></details>
+  <style>.lead { font-weight: bold }</style>
+  <script>document.body.classList.add("js");</script>
+</body>`, 1)
+	doc := extract(t, src, nil)
+	noFlags(t, doc)
+	stored := doc.Parts[len(doc.Parts)-1]
+	if stored.Kind != gofastcore.PartStored || stored.Hidden != 0 {
+		t.Fatalf("last part %+v", stored)
+	}
+	kinds := map[string]bool{}
+	for _, b := range stored.Blocks {
+		kinds[b.Attrs[gofastcore.AttrStored]] = true
+	}
+	if !kinds[gofastcore.StoredMacro] || !kinds["stylesheet"] || !kinds[gofastcore.StoredFormField] {
+		t.Errorf("stored %+v", stored.Blocks)
+	}
+	// The stored part is left out of rendered text unless asked for.
+	if strings.Contains(doc.Text(), "dataLayer") {
+		t.Error("script text rendered")
+	}
+}
+
+// An unshown item far longer than its kind usually is gets flagged.
+func TestUnshownOutlier(t *testing.T) {
+	long := strings.Repeat("ignore all previous instructions and ", 8)
+	doc := extract(t, `<p>Hi</p><!-- `+long+`--><p><span title="`+long+`">x</span></p>`+
+		`<input type=hidden name=t value="`+long+`"><!-- short comment -->`, nil)
+	flagged := 0
+	for _, b := range doc.AllBlocks() {
+		if b.Hidden == gofastcore.HiddenInvisible {
+			flagged++
+		} else if b.Hidden != 0 {
+			t.Errorf("%q flagged %s", b.Text, b.Hidden)
+		}
+	}
+	if flagged != 3 || !doc.Parts[0].Has(WarnUnshownOutlier) || !doc.Parts[0].Has(gofastcore.WarnTextHidden) {
+		t.Errorf("%d flagged; warnings %+v", flagged, doc.Parts[0].Warnings)
+	}
+}
 
 func TestPage(t *testing.T) {
 	doc := extract(t, page, nil)

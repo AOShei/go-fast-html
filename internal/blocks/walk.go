@@ -46,6 +46,12 @@ type Result struct {
 	// Stylesheets counts style elements and linked stylesheets, whose
 	// rules are not evaluated.
 	Stylesheets int
+	// Stored holds what the page keeps and shows nowhere: script and
+	// style text, hidden form values. It goes to the stored part.
+	Stored []gofastcore.Block
+	// Outliers counts unshown items (comments, attribute text) long
+	// enough to be flagged; see UnshownOutlierWords.
+	Outliers int
 }
 
 // MaxMeta bounds the length of one metadata value.
@@ -169,7 +175,7 @@ func (w *walker) element(n *dom.Node) {
 		return
 	case "style":
 		w.res.Stylesheets++
-		w.code(n, "css")
+		w.storedCode(n, "css", StoredStylesheet)
 		return
 	case "br":
 		w.buf.lineBreak()
@@ -247,10 +253,9 @@ func (w *walker) element(n *dom.Node) {
 		w.input(n)
 		return
 	case "rp":
-		// Parentheses for browsers without ruby, which hide them.
-		w.extra |= gofastcore.HiddenInvisible
+		// Parentheses for browsers without ruby; read as text, since
+		// they are routine and not a signal.
 		w.inline(n, 0)
-		w.extra &^= gofastcore.HiddenInvisible
 		return
 	case "form":
 		if a, _ := n.Attr("action"); strings.TrimSpace(a) != "" && !isScriptURL(a) {
@@ -511,6 +516,58 @@ func (w *walker) code(n *dom.Node, lang string) {
 	w.emit(blk)
 }
 
+// storedCode puts the text of a script or style element in the stored
+// part, as code, verbatim, with Attrs["stored"] saying what it is. It is
+// not flagged: pages routinely carry scripts and styles.
+func (w *walker) storedCode(n *dom.Node, lang, stored string) {
+	if w.stop {
+		return
+	}
+	saved := w.buf
+	w.buf = newBuf()
+	w.verbatim(n)
+	b := w.buf
+	w.buf = saved
+	text, _, _ := b.verbatimText()
+	if text == "" {
+		return
+	}
+	blk := gofastcore.Block{Kind: gofastcore.KindCode, Text: text,
+		Loc: w.loc(n.Start, n.End, anchorOf(n)), Attrs: map[string]string{gofastcore.AttrStored: stored}}
+	if lang != "" {
+		blk.Attrs[gofastcore.AttrLanguage] = lang
+	}
+	w.store(blk)
+}
+
+// store adds a block to the stored part, within the text budget.
+func (w *walker) store(b gofastcore.Block) {
+	if w.stop {
+		return
+	}
+	if !w.cfg.Budget.Take(gofastcore.BlockCost + len(b.Text)) {
+		w.res.Cut, w.stop = true, true
+		return
+	}
+	w.res.Stored = append(w.res.Stored, b)
+}
+
+// UnshownOutlierWords is how many words an item of text that pages store
+// and do not show (a comment, a tooltip, an accessibility label) may hold
+// before it is out of proportion for its kind, and so flagged invisible:
+// a few words are usual, a paragraph of instructions is not.
+const UnshownOutlierWords = 30
+
+// unshown returns the reasons for a stored, unshown item of text: h, and
+// invisible too when the text is an outlier.
+func (w *walker) unshown(text string, h gofastcore.Hidden) gofastcore.Hidden {
+	if len(strings.Fields(text)) > UnshownOutlierWords {
+		w.res.Outliers++
+		return h | gofastcore.HiddenInvisible
+	}
+	return h
+}
+
 // verbatim adds the text under n as it stands, a <br> as a line break.
 func (w *walker) verbatim(n *dom.Node) {
 	for c := n.FirstChild; c != nil; c = c.Next {
@@ -566,8 +623,12 @@ func (w *walker) script(n *dom.Node) {
 		lang = ""
 	}
 	w.srcRef(n, "src")
-	w.code(n, lang)
+	w.storedCode(n, lang, gofastcore.StoredMacro)
 }
+
+// StoredStylesheet is the Attrs["stored"] value of the text of a style
+// element in the stored part.
+const StoredStylesheet = "stylesheet"
 
 func (w *walker) comment(n *dom.Node) {
 	text := cleanProse(string(n.Text), false)
@@ -575,7 +636,7 @@ func (w *walker) comment(n *dom.Node) {
 		return
 	}
 	w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: text,
-		Hidden: n.Hidden | gofastcore.HiddenInvisible,
+		Hidden: w.unshown(text, n.Hidden),
 		Attrs:  map[string]string{gofastcore.AttrNoteType: gofastcore.NoteComment},
 		Loc:    w.loc(n.Start, n.End, "")})
 }
@@ -651,6 +712,20 @@ func (w *walker) input(n *dom.Node) {
 	}
 	v, ok := n.Attr("value")
 	if !ok || strings.TrimSpace(v) == "" {
+		return
+	}
+	if typ == "hidden" {
+		// Form data the page sends and does not show: the stored part.
+		text := cleanProse(v, true)
+		if text == "" {
+			return
+		}
+		attrs := map[string]string{gofastcore.AttrStored: gofastcore.StoredFormField}
+		if name, _ := n.Attr("name"); cleanRef(name) != "" {
+			attrs[gofastcore.AttrField] = cleanRef(name)
+		}
+		w.store(gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Attrs: attrs,
+			Hidden: w.unshown(text, 0), Loc: w.loc(n.Start, n.End, anchorOf(n))})
 		return
 	}
 	w.field(n, v, dom.Normal)

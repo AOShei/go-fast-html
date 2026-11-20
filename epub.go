@@ -276,7 +276,9 @@ func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub
 	if n := len(doc.Parts); n > 0 {
 		last = max(last, doc.Parts[n-1].Number)
 	}
-	stored := gofastcore.Part{Kind: gofastcore.PartStored, Number: last + 1, Hidden: gofastcore.HiddenInvisible}
+	// Not hidden as a whole: a publication routinely stores such things.
+	// The scripts and styles of the chapters come first.
+	stored := gofastcore.Part{Kind: gofastcore.PartStored, Number: last + 1, Blocks: t.stored}
 	for _, it := range pkg.Manifest {
 		if it.Path == "" || inSpine[it.Path] || it.Path == navPath || it.Path == ncxPath || !a.Has(it.Path) {
 			continue

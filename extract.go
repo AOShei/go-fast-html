@@ -63,7 +63,16 @@ const (
 	// was cut there, or there were more than 256 authors or keyword
 	// declarations and the rest were left out.
 	WarnMetadataTruncated = "html.metadata_truncated"
+	// WarnUnshownOutlier: text the page keeps and does not show, of a kind
+	// pages routinely hold (a comment, an accessibility label, a tooltip,
+	// a hidden form value), is far longer than such text usually is: more
+	// than UnshownOutlierWords words. Those items are flagged invisible.
+	WarnUnshownOutlier = "html.unshown_outlier"
 )
+
+// UnshownOutlierWords is the number of words above which an item of
+// unshown text is an outlier and is flagged.
+const UnshownOutlierWords = blocks.UnshownOutlierWords
 
 // Extractor extracts HTML, Markdown and plain text. The zero value is
 // ready to use and safe for concurrent use.
@@ -245,6 +254,11 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 		doc.Metadata = res.Meta
 	}
 	doc.Parts = append(doc.Parts, part)
+	if len(t.stored) > 0 && opts.Parts == (gofastcore.PartRange{}) {
+		stored := gofastcore.Part{Kind: gofastcore.PartStored, Number: 2, Blocks: t.stored}
+		stored.MarkHidden()
+		doc.Parts = append(doc.Parts, stored)
+	}
 	t.finish(doc)
 	return doc, nil
 }
@@ -255,7 +269,8 @@ type tally struct {
 	plain                         bool // only plain text: nothing can hide text
 	active, external, stylesheets int
 	metaCut                       bool
-	charsets                      []string // declared encodings not decoded
+	charsets                      []string           // declared encodings not decoded
+	stored                        []gofastcore.Block // for the stored part
 }
 
 // finish adds the document's warnings and HiddenChecked.
@@ -383,6 +398,12 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	t.external += res.External
 	t.stylesheets += res.Stylesheets
 	t.metaCut = t.metaCut || res.MetaCut
+	t.stored = append(t.stored, res.Stored...)
+	if res.Outliers > 0 {
+		part.Warn(gofastcore.SeverityWarning, WarnUnshownOutlier,
+			fmt.Sprintf("%d items of text the page keeps and does not show (comments, attribute text, form values) hold more than %d words; they are flagged invisible",
+				res.Outliers, UnshownOutlierWords))
+	}
 	if res.ImageData > 0 && opts.Images == gofastcore.ImagesData {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnImageUnsupportedEncoding,
 			fmt.Sprintf("%d images could not be decoded or read; their blocks have no data", res.ImageData))

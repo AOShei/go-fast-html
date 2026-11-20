@@ -1,8 +1,6 @@
 package dom
 
 import (
-	"strings"
-
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/css"
 	"github.com/AOShei/go-fast-html/internal/lexer"
@@ -91,24 +89,13 @@ func (s state) child(name string, ns NS, attrs []lexer.Attr, style *css.Style) s
 	}
 	if ns == HTML {
 		switch name {
-		case "template", "noscript", "script", "style", "noembed", "noframes", "iframe":
-			// Never rendered (template, script, style), or shown only by
-			// a browser without scripts, plugins or frames.
-			c.sticky |= gofastcore.HiddenInvisible
+		// template, noscript, noembed, noframes, iframe fallback text,
+		// script and style text, closed details and dialog, hidden
+		// inputs: pages routinely hold such content and do not show it,
+		// so it is not a signal and is not flagged (core's "What earns a
+		// flag"). The block walker reads it, and flags only outliers.
 		case "pre", "listing", "xmp", "plaintext", "textarea":
 			c.ws = Pre
-		case "details":
-			if _, open := attr("open"); !open {
-				c.closedDetails = true
-			}
-		case "dialog":
-			if _, open := attr("open"); !open {
-				c.sticky |= gofastcore.HiddenInvisible
-			}
-		case "input":
-			if v, _ := attr("type"); strings.EqualFold(strings.TrimSpace(v), "hidden") {
-				c.sticky |= gofastcore.HiddenInvisible
-			}
 		case "font":
 			if v, ok := attr("color"); ok {
 				if col, ok := css.ParseColor(v); ok {

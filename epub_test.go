@@ -162,7 +162,7 @@ func TestEPUB(t *testing.T) {
 	}
 	stored := doc.Parts[3]
 	if stored.Kind != gofastcore.PartStored || len(stored.Blocks) != 1 || stored.Blocks[0].Image.ID != "OEBPS/img/cover.jpg" ||
-		stored.Blocks[0].Text != "cover" {
+		stored.Blocks[0].Text != "cover" || stored.Hidden != 0 || stored.Blocks[0].Hidden != 0 {
 		t.Errorf("stored %+v", stored)
 	}
 	if strings.Join(children, ",") != "extra.xhtml,f.otf" || len(doc.Children) != 2 {

@@ -146,8 +146,9 @@ func TestActiveAndMeta(t *testing.T) {
 	if r.Meta.Title != "T" || r.Meta.Language != "fr" || len(r.Meta.Keywords) != 1 {
 		t.Errorf("meta %+v", r.Meta)
 	}
-	last := r.Blocks[len(r.Blocks)-1]
-	if last.Kind != gofastcore.KindCode || last.Attrs[gofastcore.AttrLanguage] != "json" || last.Hidden == 0 {
+	last := r.Stored[len(r.Stored)-1]
+	if last.Kind != gofastcore.KindCode || last.Attrs[gofastcore.AttrLanguage] != "json" || last.Hidden != 0 ||
+		last.Attrs[gofastcore.AttrStored] != gofastcore.StoredMacro {
 		t.Errorf("json script %+v", last)
 	}
 	long := strings.Repeat("x", MaxMeta+10)

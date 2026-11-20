@@ -22,7 +22,7 @@ func TestMarkdown(t *testing.T) {
 		{"a  \nb", `paragraph"a\nb"`},
 		{"| h1 | h2 |\n|----|----|\n| a  | b  |", `table[["h1" "h2"] ["a" "b"]]`},
 		{"text <span style=\"display:none\">hidden</span> more", `paragraph{invisible}"text hidden more"`},
-		{"<!-- secret note -->\n\npara", `note{invisible}"secret note" paragraph"para"`},
+		{"<!-- secret note -->\n\npara", `note"secret note" paragraph"para"`},
 		{"<div hidden>\n\nhidden *para*\n\n</div>", `paragraph{invisible}"hidden para"`},
 		{"\uFB01ne", `paragraph"fine"`},
 	} {
