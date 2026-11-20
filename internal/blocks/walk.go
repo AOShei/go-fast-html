@@ -8,6 +8,7 @@ package blocks
 import (
 	"context"
 	"strings"
+	"unicode"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/dom"
@@ -50,7 +51,7 @@ type Result struct {
 	// style text, hidden form values. It goes to the stored part.
 	Stored []gofastcore.Block
 	// Outliers counts unshown items (comments, attribute text) long
-	// enough to be flagged; see UnshownOutlierWords.
+	// enough to be flagged; see gofastcore.UnshownOutlier.
 	Outliers int
 }
 
@@ -552,16 +553,11 @@ func (w *walker) store(b gofastcore.Block) {
 	w.res.Stored = append(w.res.Stored, b)
 }
 
-// UnshownOutlierWords is how many words an item of text that pages store
-// and do not show (a comment, a tooltip, an accessibility label) may hold
-// before it is out of proportion for its kind, and so flagged invisible:
-// a few words are usual, a paragraph of instructions is not.
-const UnshownOutlierWords = 30
-
 // unshown returns the reasons for a stored, unshown item of text: h, and
-// invisible too when the text is an outlier.
+// invisible too when the text is an outlier by core's rule
+// (gofastcore.UnshownOutlier).
 func (w *walker) unshown(text string, h gofastcore.Hidden) gofastcore.Hidden {
-	if len(strings.Fields(text)) > UnshownOutlierWords {
+	if gofastcore.UnshownOutlier(text) {
 		w.res.Outliers++
 		return h | gofastcore.HiddenInvisible
 	}
@@ -724,8 +720,15 @@ func (w *walker) input(n *dom.Node) {
 		if name, _ := n.Attr("name"); cleanRef(name) != "" {
 			attrs[gofastcore.AttrField] = cleanRef(name)
 		}
+		// A value that is one unbroken token (a view state, a CSRF or
+		// SAML token) is routinely long machine data: it is exempt from
+		// the character rule, and the word rule cannot trip on one token.
+		h := gofastcore.Hidden(0)
+		if strings.ContainsFunc(text, unicode.IsSpace) {
+			h = w.unshown(text, 0)
+		}
 		w.store(gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Attrs: attrs,
-			Hidden: w.unshown(text, 0), Loc: w.loc(n.Start, n.End, anchorOf(n))})
+			Hidden: h, Loc: w.loc(n.Start, n.End, anchorOf(n))})
 		return
 	}
 	w.field(n, v, dom.Normal)
