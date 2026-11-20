@@ -123,7 +123,7 @@ func TestDeepHiddenWithinStack(t *testing.T) {
 	check = func(n *Node) {
 		for c := n.FirstChild; c != nil; c = c.Next {
 			if c.Type == TextNode && c.Display == 0 {
-				t.Errorf("text %q not flagged", c.Text)
+				t.Errorf("text %q has no display reason", c.Text)
 			}
 			check(c)
 		}

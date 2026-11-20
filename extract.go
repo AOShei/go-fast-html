@@ -38,15 +38,14 @@ const (
 //
 //	input.active_content      the page has scripts, event handler attributes
 //	                          or javascript: addresses; script text is read
-//	                          as data, flagged invisible, and nothing is run
+//	                          as data into the stored part, and nothing is
+//	                          run
 //	input.external_reference  the page loads resources from elsewhere:
 //	                          pictures, stylesheets, scripts, frames, a
 //	                          refresh to another address, a form's target;
 //	                          nothing is fetched
 //	text.unmapped_glyphs      bytes that are not valid in the encoding read
 //	                          appear as U+FFFD
-//	text.hidden               text a reader cannot see; the blocks and
-//	                          spans concerned say why
 //	image.unsupported_encoding  image data was asked for and an inline
 //	                          data: image could not be decoded
 const (

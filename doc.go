@@ -10,9 +10,10 @@
 // byte range in the source (Loc.Offset, Loc.Length) and the id of their
 // element (Loc.Anchor).
 //
-// Text a reader of the page cannot see is extracted like any other and
-// flagged with the reason, as far as the page's attributes and inline
-// style say: stylesheets and scripts are not evaluated. Script and style
-// text is read as data, flagged, and never run. Nothing the page refers to
+// Everything is extracted. Where the page declares, in an attribute or in
+// inline style, that text is not displayed or has no ink, the blocks carry
+// that reason (hidden, no_ink); nothing else about display is judged, and
+// stylesheets and scripts are not evaluated. Script and style text is read
+// as data into the stored part and never run. Nothing the page refers to
 // is fetched. See the README for the mapping, the warnings and the limits.
 package gofasthtml

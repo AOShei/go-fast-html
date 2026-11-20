@@ -14,9 +14,9 @@ const (
 	// Browsers stop near the same depth (Blink at 512).
 	DefaultMaxDepth = 512
 	// DefaultMaxStack bounds the stack of open elements. Past it an
-	// element is attached but not kept open, and the reasons it hides
-	// text are given to the element it is in, so that hidden text stays
-	// flagged; text after it in that element may be flagged too.
+	// element is attached but not kept open, and the display reasons it
+	// declares are given to the element it is in, so that its text keeps
+	// them; text after it in that element may get them too.
 	DefaultMaxStack = 4096
 	// walkLimit bounds how far down the stack an end tag looks for its
 	// element, which keeps the cost of each tag bounded.
