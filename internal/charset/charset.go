@@ -3,13 +3,17 @@
 // to offsets in the source bytes.
 //
 // The decision follows the WHATWG HTML standard's encoding sniffing, cut
-// down to what this library decodes: a byte order mark, then a <meta>
-// declaration found by the prescan of the first 1024 bytes, then UTF-8 if
-// the whole input is valid UTF-8, otherwise windows-1252. Four encodings
-// are decoded: UTF-8, UTF-16LE, UTF-16BE and windows-1252 (which the
-// Encoding standard also uses for every ISO-8859-1 and US-ASCII label). A
-// declaration of any other encoding is recorded and the input is read as
-// windows-1252.
+// down to what this library decodes: a byte order mark, then the
+// transport-layer encoding the caller gives (a MIME charset parameter),
+// then a <meta> declaration found by the prescan of the first 1024 bytes,
+// then UTF-8 if the whole input is valid UTF-8, otherwise windows-1252.
+//
+// Decoded are UTF-8, UTF-16LE, UTF-16BE, windows-1252 (which the Encoding
+// standard also uses for every ISO-8859-1 and US-ASCII label), the
+// single-byte windows-874, windows-1250 to windows-1258 and macintosh, and
+// the double-byte Shift_JIS, GBK, EUC-KR and Big5, read with Microsoft's
+// code pages 932, 936, 949 and 950 (tables.go, dbcs.go). A label naming
+// any other encoding is recorded and not used.
 package charset
 
 import (
@@ -26,41 +30,126 @@ const (
 	UTF16LE
 	UTF16BE
 	Windows1252
+	Windows874
+	Windows1250
+	Windows1251
+	Windows1253
+	Windows1254
+	Windows1255
+	Windows1256
+	Windows1257
+	Windows1258
+	Macintosh
+	ShiftJIS // code page 932
+	GBK      // code page 936
+	EUCKR    // code page 949
+	Big5     // code page 950
 )
 
+var names = [...]string{
+	UTF8: "utf-8", UTF16LE: "utf-16le", UTF16BE: "utf-16be", Windows1252: "windows-1252",
+	Windows874: "windows-874", Windows1250: "windows-1250", Windows1251: "windows-1251",
+	Windows1253: "windows-1253", Windows1254: "windows-1254", Windows1255: "windows-1255",
+	Windows1256: "windows-1256", Windows1257: "windows-1257", Windows1258: "windows-1258",
+	Macintosh: "macintosh", ShiftJIS: "shift_jis", GBK: "gbk", EUCKR: "euc-kr", Big5: "big5",
+}
+
 func (e Encoding) String() string {
-	switch e {
-	case UTF16LE:
-		return "utf-16le"
-	case UTF16BE:
-		return "utf-16be"
-	case Windows1252:
-		return "windows-1252"
+	if int(e) < len(names) {
+		return names[e]
 	}
 	return "utf-8"
 }
 
+// single returns the upper half of a single-byte table encoding, or nil.
+func (e Encoding) single() *[128]uint16 {
+	switch e {
+	case Windows874:
+		return &cp874
+	case Windows1250:
+		return &cp1250
+	case Windows1251:
+		return &cp1251
+	case Windows1253:
+		return &cp1253
+	case Windows1254:
+		return &cp1254
+	case Windows1255:
+		return &cp1255
+	case Windows1256:
+		return &cp1256
+	case Windows1257:
+		return &cp1257
+	case Windows1258:
+		return &cp1258
+	case Macintosh:
+		return &macRoman
+	}
+	return nil
+}
+
+// codePage returns the double-byte code page of e, or 0.
+func (e Encoding) codePage() int {
+	switch e {
+	case ShiftJIS:
+		return 932
+	case GBK:
+		return 936
+	case EUCKR:
+		return 949
+	case Big5:
+		return 950
+	}
+	return 0
+}
+
 // How the encoding was decided.
 const (
-	FromBOM      = "bom"
-	FromMeta     = "meta"
-	FromDetected = "detected"
+	FromBOM       = "bom"
+	FromTransport = "transport"
+	FromMeta      = "meta"
+	FromDetected  = "detected"
 )
 
 // Result is the outcome of Sniff.
 type Result struct {
 	Enc Encoding
-	// From says how the encoding was decided: FromBOM, FromMeta or
-	// FromDetected.
+	// From says how the encoding was decided: FromBOM, FromTransport,
+	// FromMeta or FromDetected.
 	From string
 	// BOM is the length of the byte order mark, 0 if there is none.
 	BOM int
 	// Declared is the label a <meta> declaration gives, lowercased, held
-	// to 64 bytes; empty if there was none.
+	// to 64 bytes; empty if there was none or it was not looked for.
 	Declared string
 	// Unsupported reports that Declared names an encoding this package
 	// does not decode; Enc is then Windows1252.
 	Unsupported bool
+	// Transport is the label the caller gave, trimmed, lowercased and
+	// held to 64 bytes, when it names an encoding this package does not
+	// decode; it was ignored.
+	Transport string
+}
+
+// transport looks up the caller's label. It returns the encoding and
+// true if it is decoded here, and otherwise the cleaned label to report
+// (empty when no label was given).
+func transport(label string) (Encoding, bool, string) {
+	if label == "" {
+		return 0, false, ""
+	}
+	// A MIME parameter may come with its quotes.
+	l := string(bytes.ToLower(bytes.Trim([]byte(label), "\t\n\f\r \"'")))
+	if e, ok := labels[l]; ok {
+		return e, true, ""
+	}
+	if len(l) > 64 {
+		l = l[:64]
+	}
+	if l == "" {
+		return 0, false, ""
+	}
+	return 0, false, l
 }
 
 func bom(b []byte) (Result, bool) {
@@ -76,23 +165,39 @@ func bom(b []byte) (Result, bool) {
 }
 
 // SniffText decides the encoding of text that has no way to declare one
-// (Markdown, plain text): a byte order mark, else UTF-8 if b is valid
+// (Markdown, plain text): a byte order mark, else the transport-layer
+// label tr if it names an encoding decoded here, else UTF-8 if b is valid
 // UTF-8, else windows-1252.
-func SniffText(b []byte) Result {
+func SniffText(b []byte, tr string) Result {
 	if r, ok := bom(b); ok {
 		return r
+	}
+	enc, ok, bad := transport(tr)
+	if ok {
+		return Result{Enc: enc, From: FromTransport}
 	}
 	if utf8.Valid(b) {
-		return Result{Enc: UTF8, From: FromDetected}
+		return Result{Enc: UTF8, From: FromDetected, Transport: bad}
 	}
-	return Result{Enc: Windows1252, From: FromDetected}
+	return Result{Enc: Windows1252, From: FromDetected, Transport: bad}
 }
 
-// Sniff decides the encoding of b.
-func Sniff(b []byte) Result {
+// Sniff decides the encoding of b, given the transport-layer label tr
+// (empty for none).
+func Sniff(b []byte, tr string) Result {
 	if r, ok := bom(b); ok {
 		return r
 	}
+	enc, ok, bad := transport(tr)
+	if ok {
+		return Result{Enc: enc, From: FromTransport}
+	}
+	r := sniffMeta(b)
+	r.Transport = bad
+	return r
+}
+
+func sniffMeta(b []byte) Result {
 	if label, ok := prescan(b[:min(len(b), 1024)]); ok {
 		r := Result{From: FromMeta, Declared: label}
 		enc, known := Lookup(label)
@@ -131,6 +236,35 @@ var labels = map[string]Encoding{
 	"iso88591": Windows1252, "iso_8859-1": Windows1252, "iso_8859-1:1987": Windows1252,
 	"l1": Windows1252, "latin1": Windows1252, "us-ascii": Windows1252,
 	"windows-1252": Windows1252, "x-cp1252": Windows1252, "x-user-defined": Windows1252,
+
+	"dos-874": Windows874, "iso-8859-11": Windows874, "iso8859-11": Windows874,
+	"iso885911": Windows874, "tis-620": Windows874, "windows-874": Windows874,
+
+	"cp1250": Windows1250, "windows-1250": Windows1250, "x-cp1250": Windows1250,
+	"cp1251": Windows1251, "windows-1251": Windows1251, "x-cp1251": Windows1251,
+	"cp1253": Windows1253, "windows-1253": Windows1253, "x-cp1253": Windows1253,
+	"cp1254": Windows1254, "csisolatin5": Windows1254, "iso-8859-9": Windows1254,
+	"iso-ir-148": Windows1254, "iso8859-9": Windows1254, "iso88599": Windows1254,
+	"iso_8859-9": Windows1254, "iso_8859-9:1989": Windows1254, "l5": Windows1254,
+	"latin5": Windows1254, "windows-1254": Windows1254, "x-cp1254": Windows1254,
+	"cp1255": Windows1255, "windows-1255": Windows1255, "x-cp1255": Windows1255,
+	"cp1256": Windows1256, "windows-1256": Windows1256, "x-cp1256": Windows1256,
+	"cp1257": Windows1257, "windows-1257": Windows1257, "x-cp1257": Windows1257,
+	"cp1258": Windows1258, "windows-1258": Windows1258, "x-cp1258": Windows1258,
+
+	"csmacintosh": Macintosh, "mac": Macintosh, "macintosh": Macintosh, "x-mac-roman": Macintosh,
+
+	"csshiftjis": ShiftJIS, "ms932": ShiftJIS, "ms_kanji": ShiftJIS, "shift-jis": ShiftJIS,
+	"shift_jis": ShiftJIS, "sjis": ShiftJIS, "windows-31j": ShiftJIS, "x-sjis": ShiftJIS,
+
+	"chinese": GBK, "csgb2312": GBK, "csiso58gb231280": GBK, "gb2312": GBK, "gb_2312": GBK,
+	"gb_2312-80": GBK, "gbk": GBK, "iso-ir-58": GBK, "x-gbk": GBK,
+
+	"cseuckr": EUCKR, "csksc56011987": EUCKR, "euc-kr": EUCKR, "iso-ir-149": EUCKR,
+	"korean": EUCKR, "ks_c_5601-1987": EUCKR, "ks_c_5601-1989": EUCKR, "ksc5601": EUCKR,
+	"ksc_5601": EUCKR, "windows-949": EUCKR,
+
+	"big5": Big5, "big5-hkscs": Big5, "cn-big5": Big5, "csbig5": Big5, "x-x-big5": Big5,
 }
 
 // Lookup returns the encoding a label names, if it is one decoded here.
@@ -185,18 +319,82 @@ func (m *Map) Source(dec int) int64 {
 // becomes in UTF-8 and how many it takes in the source. It must agree with
 // Decode.
 func step(src []byte, s int, enc Encoding) (dec, n int) {
+	r, n, _ := decodeAt(src, s, enc)
+	return utf8.RuneLen(r), n
+}
+
+// decodeAt decodes the character at src[s:] in enc, returning it, the
+// number of source bytes it takes, and whether it was not valid (and is
+// U+FFFD).
+func decodeAt(src []byte, s int, enc Encoding) (rune, int, bool) {
+	b := src[s]
 	switch enc {
+	case UTF8:
+		r, n := utf8.DecodeRune(src[s:])
+		if r == utf8.RuneError && n <= 1 {
+			return utf8.RuneError, 1, true
+		}
+		return r, n, false
 	case Windows1252:
-		return utf8.RuneLen(win1252(src[s])), 1
+		return win1252(b), 1, false
 	case UTF16LE, UTF16BE:
 		r, n := utf16At(src, s, enc == UTF16BE)
-		return utf8.RuneLen(r), n
+		return r, n, r == utf8.RuneError
 	}
-	r, n := utf8.DecodeRune(src[s:])
-	if r == utf8.RuneError && n <= 1 {
-		return 3, 1
+	if b < 0x80 {
+		return rune(b), 1, false
 	}
-	return n, n
+	if t := enc.single(); t != nil {
+		if r := t[b-0x80]; r != 0 {
+			return rune(r), 1, false
+		}
+		if b < 0xA0 {
+			// The Encoding standard's indexes give the bytes 0x80 to
+			// 0x9F a code page leaves undefined as the C1 control of the
+			// same value.
+			return rune(b), 1, false
+		}
+		return utf8.RuneError, 1, true
+	}
+	return dbcsAt(src, s, enc.codePage())
+}
+
+// dbcsAt decodes a character of double-byte code page cp at src[s:],
+// whose first byte is not ASCII. A lead byte and a trail byte that do not
+// make a character are U+FFFD; if the trail byte is ASCII it is read
+// again as a character of its own, as the Encoding standard's decoders
+// do.
+func dbcsAt(src []byte, s int, cp int) (rune, int, bool) {
+	t := dbcsTable(cp)
+	b := src[s]
+	if !isLead(cp, b) {
+		if r := t.single[b-0x80]; r != 0 {
+			return rune(r), 1, false
+		}
+		return utf8.RuneError, 1, true
+	}
+	if s+1 >= len(src) {
+		return utf8.RuneError, 1, true
+	}
+	trail := src[s+1]
+	if r := t.pair(b, trail); r != 0 {
+		return r, 2, false
+	}
+	if trail < 0x80 {
+		return utf8.RuneError, 1, true
+	}
+	return utf8.RuneError, 2, true
+}
+
+// isLead reports whether b is a lead byte of double-byte code page cp.
+func isLead(cp int, b byte) bool {
+	switch cp {
+	case 932:
+		return b >= 0x81 && b <= 0x9F || b >= 0xE0 && b <= 0xFC
+	case 936, 949, 950:
+		return b >= 0x81 && b <= 0xFE
+	}
+	return false
 }
 
 // Decode decodes src, from which the BOM has not been removed, to UTF-8.
@@ -231,22 +429,9 @@ func Decode(src []byte, r Result, limit int64) (out []byte, m *Map, invalid int,
 			m.cps = append(m.cps, checkpoint{len(out), s})
 			last = len(out)
 		}
-		var ch rune
-		var n int
-		switch r.Enc {
-		case Windows1252:
-			ch, n = win1252(src[s]), 1
-		case UTF16LE, UTF16BE:
-			ch, n = utf16At(src, s, r.Enc == UTF16BE)
-			if ch == utf8.RuneError {
-				invalid++
-			}
-		default:
-			ch, n = utf8.DecodeRune(src[s:])
-			if ch == utf8.RuneError && n <= 1 {
-				n = 1
-				invalid++
-			}
+		ch, n, bad := decodeAt(src, s, r.Enc)
+		if bad {
+			invalid++
 		}
 		if int64(len(out)+utf8.RuneLen(ch)) > limit {
 			return out, m, invalid, true

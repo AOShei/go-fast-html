@@ -337,8 +337,68 @@ func TestLocations(t *testing.T) {
 	}
 }
 
+// extractCharset extracts src as HTML with Extractor.Charset set to cs.
+func extractCharset(t *testing.T, src, cs string) *gofastcore.Document {
+	t.Helper()
+	doc, err := (&Extractor{Format: "html", Charset: cs}).Extract(context.Background(), strings.NewReader(src), int64(len(src)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	return doc
+}
+
+func TestLegacyCharsets(t *testing.T) {
+	cyr := "<p>\xCF\xF0\xE8\xE2\xE5\xF2</p><p id=b>\xEC\xE8\xF0</p>"            // windows-1251
+	jp := "<p>\x93\xFA\x96\x7B\x8C\xEA</p><p id=b>\x83\x65\x83\x58\x83\x67</p>" // Shift_JIS
+	for _, c := range []struct {
+		name, src, cs, first, second string
+	}{
+		{"1251 meta", "<meta charset=windows-1251>" + cyr, "", "Привет", "мир"},
+		{"1251 caller", cyr, "windows-1251", "Привет", "мир"},
+		{"sjis meta", `<meta http-equiv="Content-Type" content="text/html; charset=Shift_JIS">` + jp, "", "日本語", "テスト"},
+		{"sjis caller", jp, "shift_jis", "日本語", "テスト"},
+		{"caller beats meta", "<meta charset=shift_jis>" + cyr, "cp1251", "Привет", "мир"},
+	} {
+		doc := extractCharset(t, c.src, c.cs)
+		bs := doc.Parts[0].Blocks
+		if len(bs) != 2 || bs[0].Text != c.first || bs[1].Text != c.second {
+			t.Errorf("%s: %s", c.name, show(doc))
+			continue
+		}
+		if len(doc.Warnings) != 0 || doc.Parts[0].Has(gofastcore.WarnTextUnmappedGlyphs) {
+			t.Errorf("%s: warnings %+v %+v", c.name, doc.Warnings, doc.Parts[0].Warnings)
+		}
+		// Offsets point into the source bytes.
+		if l := bs[1].Loc; !strings.HasPrefix(c.src[l.Offset:l.Offset+l.Length], "<p id=b>") || !strings.HasSuffix(c.src[l.Offset:l.Offset+l.Length], "</p>") {
+			t.Errorf("%s: loc %+v", c.name, l)
+		}
+	}
+	// A byte order mark beats Charset.
+	doc := extractCharset(t, "\xEF\xBB\xBF<p>\xD0\x96</p>", "windows-1251")
+	if doc.Parts[0].Blocks[0].Text != "Ж" {
+		t.Errorf("BOM: %s", show(doc))
+	}
+	// A label not decoded is ignored, with the warning; <meta> then decides.
+	doc = extractCharset(t, "<meta charset=windows-1251>"+cyr, "x-no-such")
+	found := false
+	for _, w := range doc.Warnings {
+		found = found || w.Code == WarnCharsetUnsupported && strings.Contains(w.Message, `"x-no-such"`)
+	}
+	if !found || doc.Parts[0].Blocks[0].Text != "Привет" {
+		t.Errorf("unknown label: %+v %s", doc.Warnings, show(doc))
+	}
+	// Charset applies to plain text too.
+	d, err := (&Extractor{Format: "txt", Charset: "windows-1251"}).Extract(context.Background(), strings.NewReader("\xCF\xF0\xE8\xE2\xE5\xF2"), 6, nil)
+	if err != nil || d.Parts[0].Blocks[0].Text != "Привет" {
+		t.Errorf("txt: %v %s", err, show(d))
+	}
+}
+
 func TestCharsetWarnings(t *testing.T) {
-	doc := extract(t, `<meta charset="shift_jis"><p>x`, nil)
+	doc := extract(t, `<meta charset="koi8-r"><p>x`, nil)
 	found := false
 	for _, w := range doc.Warnings {
 		found = found || w.Code == WarnCharsetUnsupported

@@ -11,7 +11,7 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 | Path | What |
 |---|---|
 | `extract.go`, `doc.go` | Public API: `Extractor`, `Extract`, `ExtractFile`, warning codes, defaults |
-| `internal/charset` | Encoding sniffing (BOM, `<meta>` prescan, UTF-8 validity, windows-1252) and decoding to UTF-8 with a map from decoded offsets back to source offsets |
+| `internal/charset` | Encoding sniffing (BOM, caller's `Extractor.Charset`, `<meta>` prescan, UTF-8 validity, windows-1252) and decoding to UTF-8 (UTF-8, UTF-16, windows-874/1250-1258, macintosh, Shift_JIS, GBK, EUC-KR, Big5; tables copied from go-fast-rtf b756076) with a map from decoded offsets back to source offsets |
 | `internal/entity` | WHATWG named character references (`entities.txt`, embedded) and the numeric-reference rules; `gen.go` regenerates the table from `entities.json` |
 | `internal/lexer` | HTML5 tokenizer (WHATWG section 13.2.5): data, RCDATA, RAWTEXT, script data (with escaped states), PLAINTEXT, tags, attributes, comments, bogus comments, DOCTYPE, CDATA in foreign content, character references |
 | `internal/dom` | Tree builder for tag soup: implied end tags, misnested formatting (simplified adoption agency), active formatting reconstruction, foster parenting, foreign content breakout, a nesting depth limit; per-node declared display reasons (hidden attribute, template, SVG display/visibility attributes, inline style) |
@@ -33,6 +33,10 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 
 - [x] Repository setup, plan
 - [x] internal/charset (tests, fuzz)
+- [x] Legacy encodings (windows-874, 1250-1258, macintosh, Shift_JIS, GBK,
+      EUC-KR, Big5) and `Extractor.Charset` / `-charset`; FuzzDoubleByte.
+      Open: Big5-HKSCS, GB18030, ISO-8859-2..16, KOI8, EUC-JP and
+      ISO-2022-JP are still read as windows-1252 with the warning.
 - [x] internal/entity (compared entry by entry with the WHATWG table by
       the orchestrator: 2,125 names and 106 legacy names, all correct)
 - [x] internal/lexer (tests, fuzz)
