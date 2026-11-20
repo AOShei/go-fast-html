@@ -10,6 +10,9 @@ import (
 const (
 	NoteAttribute = "attribute"
 	AttrAttribute = "attribute"
+	// AttrChecked is set on a list item that begins with a checkbox (a
+	// task-list item): "true" when checked, "false" when not.
+	AttrChecked = "checked"
 )
 
 // unshown reports the attributes whose text a page stores and does not

@@ -69,6 +69,7 @@ type block struct {
 	info               string
 	htmlType           int
 	rows               [][]string // of a table: the header row first
+	task               uint8      // of a task-list item's paragraph: 1 open, 2 done
 }
 
 // Ref is a link reference definition.
@@ -78,6 +79,11 @@ type Ref struct{ Dest, Title string }
 type Doc struct {
 	root *block
 	refs map[string]Ref
+	// GFM turns on the inline extensions of GitHub Flavored Markdown
+	// when the document is rendered: strikethrough, task-list items and
+	// extended autolinks. Parse sets it; RenderSpec ignores it. Tables
+	// are always read.
+	GFM bool
 }
 
 type parser struct {
@@ -123,7 +129,7 @@ func Parse(ctx context.Context, src string) (*Doc, error) {
 	for p.tip != nil {
 		p.finalize(p.tip)
 	}
-	return &Doc{root: p.doc, refs: p.refs}, nil
+	return &Doc{root: p.doc, refs: p.refs, GFM: true}, nil
 }
 
 func (p *parser) peek(i int) int {

@@ -67,6 +67,7 @@ type liCtx struct {
 	ordered bool
 	level   int
 	used    bool
+	checked string // "true" or "false" for a task-list item
 }
 
 type walker struct {
@@ -351,6 +352,9 @@ func (w *walker) flush() {
 			b.Kind, b.Level = gofastcore.KindHeading, uint8(w.heading)
 		case w.li != nil && !w.li.used:
 			b.Kind, b.Level, b.Ordered, b.Marker = gofastcore.KindListItem, uint8(min(w.li.level, 255)), w.li.ordered, w.li.marker
+			if w.li.checked != "" {
+				b.Attrs = map[string]string{AttrChecked: w.li.checked}
+			}
 			w.li.used = true
 		case w.caption > 0:
 			b.Kind = gofastcore.KindCaption
@@ -632,7 +636,17 @@ func (w *walker) input(n *dom.Node) {
 			w.buf.pending = true
 		}
 		return
-	case "checkbox", "radio", "file", "range", "color":
+	case "checkbox":
+		// A checkbox that begins a list item makes it a task: whether it
+		// is checked goes to the item's Attrs["checked"].
+		if w.li != nil && !w.li.used && w.cell == 0 && isBlank(w.buf.b) {
+			w.li.checked = "false"
+			if _, on := n.Attr("checked"); on {
+				w.li.checked = "true"
+			}
+		}
+		return
+	case "radio", "file", "range", "color":
 		return
 	}
 	v, ok := n.Attr("value")

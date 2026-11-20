@@ -43,12 +43,13 @@ type renderer struct {
 	refs  map[string]Ref
 	limit int
 	spec  bool
+	gfm   bool
 }
 
 // Render writes the document as HTML, stopping before limit bytes. Link
 // and image addresses are written as the source has them.
 func (d *Doc) Render(limit int) *HTML {
-	r := &renderer{o: &HTML{}, refs: d.refs, limit: limit}
+	r := &renderer{o: &HTML{}, refs: d.refs, limit: limit, gfm: d.GFM}
 	r.block(d.root, false)
 	return r.o
 }
@@ -138,6 +139,9 @@ func (r *renderer) block(b *block, tight bool) {
 		r.gen(open, b.start, b.start)
 		for _, it := range b.children {
 			r.gen("<li>", it.start, it.start)
+			if r.gfm && len(it.children) > 0 && it.children[0].kind == kPara {
+				taskItem(it.children[0])
+			}
 			for _, c := range it.children {
 				r.block(c, b.tight)
 			}
@@ -148,6 +152,12 @@ func (r *renderer) block(b *block, tight bool) {
 		h := len(r.o.B)
 		if !tight {
 			r.o.B = append(r.o.B, "<p>"...)
+		}
+		switch b.task {
+		case 1:
+			r.o.B = append(r.o.B, `<input type="checkbox" disabled="" /> `...)
+		case 2:
+			r.o.B = append(r.o.B, `<input type="checkbox" checked="" disabled="" /> `...)
 		}
 		r.inline(strings.Trim(b.content, " \t\n"))
 		if !tight {
@@ -213,10 +223,29 @@ func (r *renderer) block(b *block, tight bool) {
 	}
 }
 
+// taskItem makes the first paragraph of a list item that begins with
+// "[ ]", "[x]" or "[X]" and white space a GFM task-list item: the marker
+// becomes a checkbox.
+func taskItem(p *block) {
+	c := strings.TrimLeft(p.content, " \t")
+	if len(c) < 4 || c[0] != '[' || c[2] != ']' || c[3] != ' ' && c[3] != '\t' && c[3] != '\n' {
+		return
+	}
+	switch c[1] {
+	case ' ':
+		p.task = 1
+	case 'x', 'X':
+		p.task = 2
+	default:
+		return
+	}
+	p.content = c[4:]
+}
+
 // inline renders the inline content s, walking the tree without
 // recursion, since emphasis can nest as deep as the text is long.
 func (r *renderer) inline(s string) {
-	root := inlines(s, r.refs)
+	root := inlines(s, r.refs, r.gfm)
 	n := root.first
 	for n != nil {
 		switch n.kind {
@@ -236,6 +265,8 @@ func (r *renderer) inline(s string) {
 			r.o.B = append(r.o.B, "<em>"...)
 		case iStrong:
 			r.o.B = append(r.o.B, "<strong>"...)
+		case iStrike:
+			r.o.B = append(r.o.B, "<del>"...)
 		case iLink:
 			r.o.B = append(r.o.B, `<a href="`...)
 			r.esc(r.dest(n.dest), true)
@@ -286,6 +317,8 @@ func (r *renderer) close(n *inode) {
 		r.o.B = append(r.o.B, "</em>"...)
 	case iStrong:
 		r.o.B = append(r.o.B, "</strong>"...)
+	case iStrike:
+		r.o.B = append(r.o.B, "</del>"...)
 	case iLink:
 		r.o.B = append(r.o.B, "</a>"...)
 	}

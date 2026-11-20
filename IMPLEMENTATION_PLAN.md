@@ -50,10 +50,11 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 - [x] Plain text (run 2): `text.go`
 - [x] Format detection (`Detect`, `Extractor.Format`)
 - [x] CLI `cmd/gofasthtml` (run 2), with tests
-- [ ] Run the CommonMark spec examples (spec.txt) as a test; not
-      available offline, so only hand-picked spec cases are tested
-- [ ] GFM task lists, strikethrough, extended autolinks, footnotes;
-      front matter
+- [x] CommonMark 0.31.2 spec examples as a test (run 4): 652/652 pass;
+      the spec JSON is read from outside the repository
+- [x] GFM strikethrough, task-list items, extended autolinks (run 4)
+- [ ] GFM footnotes; front matter; the GFM spec's own examples (not
+      available offline; hand-picked GFM cases are tested)
 
 ## Phase 3 (run 3)
 

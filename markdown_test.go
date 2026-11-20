@@ -32,6 +32,30 @@ func TestMarkdown(t *testing.T) {
 	}
 }
 
+func TestMarkdownGFM(t *testing.T) {
+	doc := extractAs(t, "md", "- [x] done ~~old~~\n- [ ] todo www.example.com\n- plain", &gofastcore.Options{Spans: true})
+	bs := doc.Parts[0].Blocks
+	if len(bs) != 3 || bs[0].Text != "done old" || bs[0].Attrs["checked"] != "true" ||
+		bs[1].Text != "todo www.example.com" || bs[1].Attrs["checked"] != "false" || bs[2].Attrs != nil {
+		t.Fatalf("blocks %s %+v", show(doc), bs)
+	}
+	var strike, link bool
+	for _, s := range bs[0].Spans {
+		strike = strike || s.Style == gofastcore.StyleStrike && bs[0].Text[s.Start:s.End] == "old"
+	}
+	for _, s := range bs[1].Spans {
+		link = link || s.Href == "http://www.example.com"
+	}
+	if !strike || !link {
+		t.Errorf("spans %+v %+v", bs[0].Spans, bs[1].Spans)
+	}
+	// HTML task lists read the same way.
+	doc = extract(t, `<ul><li><input type=checkbox checked> a<li>b <input type=checkbox></ul>`, nil)
+	if bs := doc.Parts[0].Blocks; bs[0].Attrs["checked"] != "true" || bs[1].Attrs != nil {
+		t.Errorf("html task list %+v", bs)
+	}
+}
+
 func TestThematicBreakRoundTrip(t *testing.T) {
 	doc := extractAs(t, "md", "One\n\n* * *\n\nTwo", nil)
 	md := doc.Markdown()

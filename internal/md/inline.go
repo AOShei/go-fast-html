@@ -22,6 +22,7 @@ const (
 	iStrong
 	iLink
 	iImage
+	iStrike
 )
 
 type inode struct {
@@ -90,19 +91,20 @@ type inliner struct {
 	// Scans that found no end once find none later either.
 	noTick                           map[int]bool
 	noComment, noPI, noCDATA, noDecl bool
+	gfm                              bool
 }
 
 var special [256]bool
 
 func init() {
-	for _, c := range "\n\\`*_[]!<&" {
+	for _, c := range "\n\\`*_[]!<&~" {
 		special[c] = true
 	}
 }
 
 // inlines parses the inline content s.
-func inlines(s string, refs map[string]Ref) *inode {
-	p := &inliner{s: s, root: &inode{kind: iRoot}, refs: refs}
+func inlines(s string, refs map[string]Ref, gfm bool) *inode {
+	p := &inliner{s: s, root: &inode{kind: iRoot}, refs: refs, gfm: gfm}
 	for p.pos < len(s) {
 		p.step()
 	}
@@ -152,6 +154,13 @@ func (p *inliner) step() {
 		p.codeSpan()
 	case '*', '_':
 		p.delimRun(c)
+	case '~':
+		if p.gfm {
+			p.delimRun(c)
+		} else {
+			p.text("~")
+			p.pos++
+		}
 	case '[':
 		p.pos++
 		p.pushBracket(p.text("["), false)
@@ -180,9 +189,120 @@ func (p *inliner) step() {
 		for j < len(s) && !special[s[j]] {
 			j++
 		}
+		if p.gfm {
+			if k, end, dest := extAutolink(s, p.pos, j); k >= 0 {
+				if k > p.pos {
+					p.text(s[p.pos:k])
+				}
+				l := &inode{kind: iLink, dest: dest}
+				l.append(&inode{kind: iText, text: s[k:end]})
+				p.root.append(l)
+				p.pos = end
+				return
+			}
+		}
 		p.text(s[p.pos:j])
 		p.pos = j
 	}
+}
+
+// extAutolink finds the first GFM extended autolink (www., http://,
+// https://) that starts in s[from:to] where a link may start: at the
+// start of the text, after white space, or after one of *_~(. It returns
+// where it starts and ends and its address, or k = -1.
+func extAutolink(s string, from, to int) (k, end int, dest string) {
+	for i := from; i < to; i++ {
+		c := s[i]
+		if c != 'w' && c != 'h' && c != 'W' && c != 'H' {
+			continue
+		}
+		if i > 0 && !strings.ContainsRune(" \t\n*_~(", rune(s[i-1])) {
+			continue
+		}
+		rest := s[i:]
+		prefix := ""
+		switch {
+		case hasPrefixFold(rest, "www."):
+			prefix = "http://"
+		case hasPrefixFold(rest, "http://"), hasPrefixFold(rest, "https://"):
+		default:
+			continue
+		}
+		start := i
+		if prefix == "" {
+			start = i + strings.IndexByte(rest, ':') + 3
+		}
+		// The domain: segments of letters, digits, _ and -, separated
+		// by periods; no _ in the last two.
+		j := start
+		segs, lastUnderscore, prevUnderscore := 0, false, false
+		for j < len(s) {
+			e := j
+			under := false
+			for e < len(s) && (isAlnum(s[e]) || s[e] == '-' || s[e] == '_' || s[e] >= 0x80) {
+				under = under || s[e] == '_'
+				e++
+			}
+			if e == j {
+				break
+			}
+			segs++
+			prevUnderscore, lastUnderscore = lastUnderscore, under
+			j = e
+			if j+1 < len(s) && s[j] == '.' && (isAlnum(s[j+1]) || s[j+1] == '-' || s[j+1] == '_' || s[j+1] >= 0x80) {
+				j++
+				continue
+			}
+			break
+		}
+		if segs < 1 || lastUnderscore || prevUnderscore || prefix != "" && segs < 2 {
+			continue
+		}
+		// The path: up to white space or '<'.
+		for j < len(s) && s[j] != '<' && s[j] != ' ' && s[j] != '\t' && s[j] != '\n' {
+			j++
+		}
+		j = trimAutolink(s, start, j)
+		return i, j, prefix + s[i:j]
+	}
+	return -1, 0, ""
+}
+
+func hasPrefixFold(s, p string) bool {
+	return len(s) >= len(p) && strings.EqualFold(s[:len(p)], p)
+}
+
+// trimAutolink drops what GFM says does not end an extended autolink:
+// trailing punctuation, an unbalanced closing parenthesis, and what looks
+// like an entity reference.
+func trimAutolink(s string, start, j int) int {
+	for j > start {
+		c := s[j-1]
+		switch {
+		case strings.IndexByte("?!.,:*_~'\"", c) >= 0:
+			j--
+		case c == ')':
+			open := strings.Count(s[start:j], "(")
+			if strings.Count(s[start:j], ")") > open {
+				j--
+				continue
+			}
+			return j
+		case c == ';':
+			k := j - 2
+			for k > start && isAlnum(s[k]) {
+				k--
+			}
+			if k >= start && s[k] == '&' && k < j-2 {
+				j = k
+				continue
+			}
+			return j
+		default:
+			return j
+		}
+	}
+	return j
 }
 
 func (p *inliner) codeSpan() {
@@ -240,7 +360,7 @@ func (p *inliner) delimRun(ch byte) {
 		canClose = right && (!left || ap)
 	}
 	node := p.text(s[start:p.pos])
-	if canOpen || canClose {
+	if (canOpen || canClose) && (ch != '~' || n <= 2) {
 		d := &delim{node: node, ch: ch, num: n, orig: n, canOpen: canOpen, canClose: canClose, prev: p.delims}
 		if p.delims != nil {
 			p.delims.next = d
@@ -287,6 +407,10 @@ func (p *inliner) emphasis(bottom *delim) {
 		found := false
 		for opener != nil && opener != bottom && opener != ob {
 			odd := (closer.canOpen || opener.canClose) && closer.orig%3 != 0 && (opener.orig+closer.orig)%3 == 0
+			if closer.ch == '~' {
+				// Strikethrough: runs of the same length, one or two.
+				odd = opener.num != closer.num
+			}
 			if opener.ch == closer.ch && opener.canOpen && !odd {
 				found = true
 				break
@@ -299,13 +423,19 @@ func (p *inliner) emphasis(bottom *delim) {
 			if closer.num >= 2 && opener.num >= 2 {
 				use = 2
 			}
+			if closer.ch == '~' {
+				use = closer.num
+			}
 			on, cn := opener.node, closer.node
 			opener.num -= use
 			closer.num -= use
 			on.text = on.text[:len(on.text)-use]
 			cn.text = cn.text[:len(cn.text)-use]
 			em := &inode{kind: iEmph}
-			if use == 2 {
+			switch {
+			case closer.ch == '~':
+				em.kind = iStrike
+			case use == 2:
 				em.kind = iStrong
 			}
 			for tmp := on.next; tmp != nil && tmp != cn; {

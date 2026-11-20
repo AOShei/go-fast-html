@@ -59,6 +59,31 @@ func TestRender(t *testing.T) {
 	}
 }
 
+// Cases from the GFM spec's extensions.
+func TestGFM(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"~~Hi~~ Hello, ~there~ world!", "<p><del>Hi</del> Hello, <del>there</del> world!</p>"},
+		{"This ~~has a\n\nnew paragraph~~.", "<p>This ~~has a</p><p>new paragraph~~.</p>"},
+		{"This will ~~~not~~~ strike.", "<p>This will ~~~not~~~ strike.</p>"},
+		{"~~a~ b~", "<p>~~a~ b~</p>"},
+		{"- [ ] foo\n- [x] bar", `<ul><li><input type="checkbox" disabled="" /> foo</li><li><input type="checkbox" checked="" disabled="" /> bar</li></ul>`},
+		{"- [x]foo\n- [y] z", "<ul><li>[x]foo</li><li>[y] z</li></ul>"},
+		{"www.commonmark.org", `<p><a href="http://www.commonmark.org">www.commonmark.org</a></p>`},
+		{"Visit www.commonmark.org/help for more information.", `<p>Visit <a href="http://www.commonmark.org/help">www.commonmark.org/help</a> for more information.</p>`},
+		{"Visit www.commonmark.org.", `<p>Visit <a href="http://www.commonmark.org">www.commonmark.org</a>.</p>`},
+		{"www.google.com/search?q=Markup+(business))", `<p><a href="http://www.google.com/search?q=Markup+(business)">www.google.com/search?q=Markup+(business)</a>)</p>`},
+		{"www.commonmark.org/he<lp", `<p><a href="http://www.commonmark.org/he">www.commonmark.org/he</a>&lt;lp</p>`},
+		{"www.google.com/search?q=commonmark&hl;", `<p><a href="http://www.google.com/search?q=commonmark">www.google.com/search?q=commonmark</a>&amp;hl;</p>`},
+		{"(https://a.b/c_d) *http://x.y*", `<p>(<a href="https://a.b/c_d">https://a.b/c_d</a>) <em><a href="http://x.y">http://x.y</a></em></p>`},
+		{"www.a_b.c_d nowww.x.y wwwx", "<p>www.a_b.c_d nowww.x.y wwwx</p>"},
+		{"`www.x.y` <http://a.b>", `<p><code>www.x.y</code> <a href="http://a.b">http://a.b</a></p>`},
+	} {
+		if got := render(t, c.in); got != c.want {
+			t.Errorf("%q:\n got %s\nwant %s", c.in, got, c.want)
+		}
+	}
+}
+
 func TestSourceMap(t *testing.T) {
 	src := "# Head\n\npara one\nline two\n\n<div>\n<p id=x>raw</p>\n</div>\n"
 	d, _ := Parse(context.Background(), src)
