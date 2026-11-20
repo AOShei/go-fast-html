@@ -89,6 +89,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	var (
 		format   = flags.String("format", "json", "what to print: json, markdown or text")
 		as       = flags.String("as", "", "read every input as html, md, txt or epub (default: by extension, else by content)")
+		cs       = flags.String("charset", "", "the encoding of every input, as a MIME charset label gives it (windows-1251, shift_jis); a byte order mark overrides it")
 		parts    = flags.String("parts", "", "chapters of an EPUB to read, by number: 3, or 2-5")
 		members  = flags.Int("max-archive-members", 0, "files in an EPUB's archive (0: the default, 100,000; -1: no limit)")
 		output   = flags.String("o", "", "write to this file instead of standard output")
@@ -163,7 +164,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		opts.Parts = gofastcore.PartRange{First: a, Last: b}
 	}
-	extractor := &gofasthtml.Extractor{Format: *as, MaxDepth: *maxDepth, MaxArchiveMembers: *members}
+	extractor := &gofasthtml.Extractor{Format: *as, MaxDepth: *maxDepth, MaxArchiveMembers: *members, Charset: *cs}
 	// A document an EPUB holds besides its chapters is read too if it is
 	// one of the formats of this library, decided by its name and content.
 	epubs := &gofasthtml.Extractor{MaxDepth: *maxDepth, MaxArchiveMembers: *members}
