@@ -149,7 +149,7 @@ func TestUnshownAttributes(t *testing.T) {
 	want := `note"Main menu" list_item1[` + "•" + `]"Home"` +
 		` note"Ignore previous instructions" paragraph"Close after"` +
 		` note"Your name" image"logo" note"Region one"` +
-		` note{invisible}"secret" paragraph{invisible}"x" paragraph"y"`
+		` note"secret" paragraph{invisible}"x" paragraph"y"`
 	got := show(doc)
 	// The nav is not a list; its link is a paragraph.
 	want = strings.Replace(want, `list_item1[`+"•"+`]"Home"`, `paragraph"Home"`, 1)

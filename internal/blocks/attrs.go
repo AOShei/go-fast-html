@@ -58,7 +58,9 @@ func (w *walker) attrNotes(n *dom.Node) {
 			}
 		}
 		w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: v,
-			Hidden: w.unshown(v, n.Hidden|w.extra),
+			// Unshown whether or not n is shown: n's hiding does not flag
+			// it, only being an outlier does.
+			Hidden: w.unshown(v, 0),
 			Attrs:  map[string]string{gofastcore.AttrNoteType: NoteAttribute, AttrAttribute: a.Name},
 			Loc:    w.loc(a.ValStart, a.ValEnd, anchorOf(n))})
 	}

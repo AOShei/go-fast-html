@@ -632,7 +632,9 @@ func (w *walker) comment(n *dom.Node) {
 		return
 	}
 	w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: text,
-		Hidden: w.unshown(text, n.Hidden),
+		// A comment is never shown, so the hiding of the element it
+		// stands in does not flag it; only being an outlier does.
+		Hidden: w.unshown(text, 0),
 		Attrs:  map[string]string{gofastcore.AttrNoteType: gofastcore.NoteComment},
 		Loc:    w.loc(n.Start, n.End, "")})
 }

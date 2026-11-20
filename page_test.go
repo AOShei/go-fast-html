@@ -106,6 +106,20 @@ func TestUnshownOutlier(t *testing.T) {
 	}
 }
 
+// A comment or an attribute inside a hidden element is routine unshown
+// data like any other: it would not be seen were the element shown, so
+// the element's hiding does not flag it (the comments a framework leaves
+// inside a hidden span, the label of a collapsed menu's button).
+func TestUnshownInsideHiddenNotFlagged(t *testing.T) {
+	doc := extract(t, `<p>Hi</p><span hidden><!--lit-part Pz0gobCCM4E=--></span>`+
+		`<div style="display:none"><button aria-label="Show navigation menu"></button></div>`, nil)
+	for _, b := range doc.AllBlocks() {
+		if b.Kind == gofastcore.KindNote && b.Hidden != 0 {
+			t.Errorf("%q flagged %s", b.Text, b.Hidden)
+		}
+	}
+}
+
 // Core's character rule: an unshown item of more than 300 characters
 // other than white space is an outlier whatever its word count, which
 // catches encoded payloads and text written without spaces.
