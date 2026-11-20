@@ -9,4 +9,5 @@
 - Invisible characters are no longer scanned for or reported; they stay in the text.
 - Command: `-exclude-hidden` is replaced by `-exclude-display[=hidden,no_ink]`.
 - Command: `-furniture`, `-stored` and `-part-markers` added, the render flags shared by every go-fast command; `-exclude-display`'s help text matches theirs, and its error for an unknown reason names only `hidden, no_ink`.
+- go-fast-core pinned at 787b056 (adds `RenderOptions.Children`). Command: `-children` (default true) renders embedded documents, an EPUB's documents beside its chapters, in Markdown and text, each after a line naming it; `-children=false` leaves them out. An EPUB with such documents now prints them in text and Markdown by default.
 - `template` content as `hidden` is decided (Andrew, 2026-11-20).

@@ -3,8 +3,8 @@
 Module `github.com/AOShei/go-fast-html`, package `gofasthtml`. Extracts
 HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 `Loc.Offset`/`Length` are byte offsets into the source; `Loc.Anchor` from
-`id`). go-fast-core pinned at commit 05bbddb, schema 0.2
-(`v0.0.0-20261120081927-05bbddb16b9f`).
+`id`). go-fast-core pinned at commit 787b056, schema 0.2
+(`v0.0.0-20261120105453-787b0567ad0e`).
 
 ## Layout
 
@@ -88,6 +88,9 @@ HTML, Markdown and plain text into the go-fast-core model (one `body` part;
 - [x] Command: the shared render flags of COMMAND_FLAGS.md
       (`-furniture`, `-stored`, `-part-markers`), and the
       `-exclude-display` help text and error aligned with it (2026-11-20)
+- [x] Pin core 787b056; command `-children` (default true) sets
+      `RenderOptions.Children`, so an EPUB's other documents render
+      after a line naming each (2026-11-20)
 - [x] Tests: each declaration, one former inferred case per removed
       check, characters kept (HTML, Markdown, plain text, EPUB)
 

@@ -19,6 +19,7 @@ The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directorie
 | `-furniture` | include running headers and footers |
 | `-stored` | include the stored part (data the file keeps but shows nowhere) |
 | `-part-markers` | put a line before each part saying which part it is |
+| `-children` (default true) | include embedded documents (an EPUB's documents beside its chapters), each after a line naming it (`[child 1: name]` in text); `-children=false` leaves them out |
 | `-exclude-display[=reasons]` | leave out what the file declares not displayed: all of it (alone, `=true` or `=all`), or only the reasons named (`=hidden`, `=no_ink`, `=hidden,no_ink`); `=false` or `=` is off, and any other value is an error |
 
 This library produces no running headers and footers itself; `-furniture` is there for the documents other extractors may return as children. Its stored part holds scripts, styles, `<input type=hidden>` values and EPUB images no chapter shows.
