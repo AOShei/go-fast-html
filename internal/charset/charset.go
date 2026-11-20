@@ -320,7 +320,11 @@ func (m *Map) Source(dec int) int64 {
 // Decode.
 func step(src []byte, s int, enc Encoding) (dec, n int) {
 	r, n, _ := decodeAt(src, s, enc)
-	return utf8.RuneLen(r), n
+	dec = utf8.RuneLen(r)
+	if mark := markAt(src, s, enc); mark != 0 {
+		dec += utf8.RuneLen(mark)
+	}
+	return dec, n
 }
 
 // decodeAt decodes the character at src[s:] in enc, returning it, the
@@ -382,6 +386,13 @@ func dbcsAt(src []byte, s int, cp int) (rune, int, bool) {
 		return utf8.RuneError, 1, true
 	}
 	trail := src[s+1]
+	if cp == 950 {
+		// The pairs that decode to two code points; markAt gives the
+		// second.
+		if r, _ := big5Pair(b, trail); r != 0 {
+			return r, 2, false
+		}
+	}
 	if r := t.pair(b, trail); r != 0 {
 		return r, 2, false
 	}
@@ -476,10 +487,18 @@ func Decode(src []byte, r Result, limit int64) (out []byte, m *Map, invalid int,
 		if bad {
 			invalid++
 		}
-		if int64(len(out)+utf8.RuneLen(ch)) > limit {
+		mark := markAt(src, s, r.Enc)
+		size := utf8.RuneLen(ch)
+		if mark != 0 {
+			size += utf8.RuneLen(mark)
+		}
+		if int64(len(out)+size) > limit {
 			return out, m, invalid, true
 		}
 		out = utf8.AppendRune(out, ch)
+		if mark != 0 {
+			out = utf8.AppendRune(out, mark)
+		}
 		s += n
 	}
 	return out, m, invalid, false
