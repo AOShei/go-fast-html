@@ -2,7 +2,7 @@
 
 ## v0.1.0 (not yet tagged)
 
-The first release. Built on go-fast-core at `4499357`, schema `0.2`.
+The first release. Built on go-fast-core v0.1.0, schema `0.2`.
 Standard library and go-fast-core only.
 
 - **HTML.** An HTML5 tokenizer and tree builder of its own that recover
@@ -40,6 +40,12 @@ Standard library and go-fast-core only.
   `-children` and `-exclude-display[=reasons]`.
 
 ## Before v0.1.0
+
+### Core v0.1.0
+
+- go-fast-core pinned at its v0.1.0 tag. Nothing changes here: since
+  `4499357` core changed documentation, and `TextBudget.Take` now takes a
+  negative amount as 0, which this library never passes.
 
 ### Core 4499357: closed value sets, shared render flags
 
