@@ -96,6 +96,9 @@ func TestEPUBEncryptionUnread(t *testing.T) {
 		{"larger than MaxXML", big, gofastcore.ErrLimitExceeded},
 		{"cut short", broken, gofastcore.ErrMalformed},
 	} {
+		if c.enc == big && testing.Short() {
+			continue // a 16 MiB member
+		}
 		b := chapterEPUB(t, chapters, nav, "", "META-INF/encryption.xml", c.enc)
 		doc, err := extractBytes(b, nil)
 		if !errors.Is(err, c.want) || doc != nil {
@@ -106,10 +109,16 @@ func TestEPUBEncryptionUnread(t *testing.T) {
 	// With a spine entry that is not a content document, there is a
 	// document, and its chapter is reported as possibly encrypted.
 	b := pub{chapters: chapters[2:], nav: nav, spineStart: `<itemref idref="missing"/>`,
-		files: []string{"META-INF/encryption.xml", broken}}.build(t)
-	doc, err := extractBytes(b, nil)
+		manifestExtra: `<item id="pic" href="pic.png" media-type="image/png"/>`,
+		files:         []string{"META-INF/encryption.xml", broken, "OEBPS/pic.png", "CIPHERTEXT"}}.build(t)
+	doc, err := extractBytes(b, &gofastcore.Options{Images: gofastcore.ImagesData})
 	if err != nil {
 		t.Fatal(err)
+	}
+	stored := doc.Parts[len(doc.Parts)-1]
+	doc.Parts = doc.Parts[:len(doc.Parts)-1]
+	if stored.Kind != gofastcore.PartStored || stored.Blocks[0].Image.Data != nil || !stored.Has(WarnEncrypted) || stored.Has(gofastcore.WarnImageUnsupportedEncoding) {
+		t.Errorf("stored image: %+v", stored)
 	}
 	if len(doc.Parts) != 2 || !doc.Parts[1].Has(gofastcore.WarnPartFailed) || !doc.Parts[1].Has(WarnEncrypted) || len(doc.Parts[1].Blocks) != 0 {
 		t.Errorf("chapter 2: %+v", doc.Parts)
@@ -174,11 +183,14 @@ func TestEPUBOutlineAndMetadataBounds(t *testing.T) {
 	chapters := []string{"c1.xhtml", xhtml("T", "<p>one</p>")}
 	long := strings.Repeat("t", epub.MaxTitle+10)
 
+	var doc *gofastcore.Document
 	// A navigation document larger than MaxXML.
-	bigNav := strings.Replace(navOf(`<ol><li><a href="c1.xhtml">One</a></li></ol>`), "<body>", "<body><!--"+strings.Repeat("p", epub.MaxXML)+"-->", 1)
-	doc := extractEPUB(t, chapterEPUB(t, chapters, bigNav, ""), nil)
-	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.Contains(w[0], "navigation document") {
-		t.Errorf("big nav: %q", w)
+	if !testing.Short() {
+		bigNav := strings.Replace(navOf(`<ol><li><a href="c1.xhtml">One</a></li></ol>`), "<body>", "<body><!--"+strings.Repeat("p", epub.MaxXML)+"-->", 1)
+		doc = extractEPUB(t, chapterEPUB(t, chapters, bigNav, ""), nil)
+		if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.Contains(w[0], "navigation document") {
+			t.Errorf("big nav: %q", w)
+		}
 	}
 
 	// A title cut, the same whether its text is one node or several.
@@ -200,15 +212,17 @@ func TestEPUBOutlineAndMetadataBounds(t *testing.T) {
 	}
 
 	// More entries than MaxEntries.
-	var ol strings.Builder
-	ol.WriteString("<ol>")
-	for range epub.MaxEntries + 3 {
-		ol.WriteString(`<li><a href="c1.xhtml">E</a></li>`)
-	}
-	ol.WriteString("</ol>")
-	doc = extractEPUB(t, chapterEPUB(t, chapters, navOf(ol.String()), ""), nil)
-	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || len(doc.Outline) != epub.MaxEntries {
-		t.Errorf("many entries: %q, %d entries", w, len(doc.Outline))
+	if !testing.Short() {
+		var ol strings.Builder
+		ol.WriteString("<ol>")
+		for range epub.MaxEntries + 3 {
+			ol.WriteString(`<li><a href="c1.xhtml">E</a></li>`)
+		}
+		ol.WriteString("</ol>")
+		doc = extractEPUB(t, chapterEPUB(t, chapters, navOf(ol.String()), ""), nil)
+		if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || len(doc.Outline) != epub.MaxEntries {
+			t.Errorf("many entries: %q, %d entries", w, len(doc.Outline))
+		}
 	}
 
 	// Metadata: a description cut at 64 KiB wherever its text is split,
@@ -239,6 +253,9 @@ func TestEPUBOutlineAndMetadataBounds(t *testing.T) {
 // container.xml or a package document larger than MaxXML is a limit,
 // not a malformed file.
 func TestEPUBPackageTooLarge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("16 MiB members")
+	}
 	pad := "<!--" + strings.Repeat("p", epub.MaxXML) + "-->"
 	b := chapterEPUB(t, []string{"c1.xhtml", xhtml("T", "<p>one</p>")}, "", pad)
 	if _, err := extractBytes(b, nil); !errors.Is(err, gofastcore.ErrLimitExceeded) {
@@ -258,8 +275,17 @@ func TestEPUBStoredImageBudget(t *testing.T) {
 		files:         []string{"OEBPS/pic.png", "\x89PNG" + strings.Repeat("\x00", 200000)}}.build(t)
 	doc := extractEPUB(t, b, &gofastcore.Options{Images: gofastcore.ImagesData, Limits: gofastcore.Limits{MaxDecodedBytes: 100000}})
 	stored := doc.Parts[len(doc.Parts)-1]
-	if stored.Kind != gofastcore.PartStored || stored.Blocks[0].Image.Data != nil || !stored.Has(gofastcore.WarnLimitExceeded) {
+	if stored.Kind != gofastcore.PartStored || stored.Blocks[0].Image.Data != nil || !stored.Has(gofastcore.WarnLimitExceeded) ||
+		stored.Has(gofastcore.WarnImageUnsupportedEncoding) {
 		t.Errorf("stored %+v", stored)
+	}
+	// A chapter's image over the budget: one warning, for the limit.
+	shown := pub{chapters: []string{"c1.xhtml", xhtml("T", `<p>one</p><img src="pic.png" alt="p"/>`)},
+		manifestExtra: `<item id="pic" href="pic.png" media-type="image/png"/>`,
+		files:         []string{"OEBPS/pic.png", "\x89PNG" + strings.Repeat("\x00", 200000)}}.build(t)
+	doc = extractEPUB(t, shown, &gofastcore.Options{Images: gofastcore.ImagesData, Limits: gofastcore.Limits{MaxDecodedBytes: 100000}})
+	if p := doc.Parts[0]; !p.Has(gofastcore.WarnLimitExceeded) || p.Has(gofastcore.WarnImageUnsupportedEncoding) {
+		t.Errorf("chapter %+v", p.Warnings)
 	}
 	doc = extractEPUB(t, b, &gofastcore.Options{Images: gofastcore.ImagesData})
 	if stored := doc.Parts[len(doc.Parts)-1]; len(stored.Blocks[0].Image.Data) == 0 || len(stored.Warnings) != 0 {
@@ -363,5 +389,100 @@ func TestEPUBEncryptedImage(t *testing.T) {
 	}
 	if w := warnings(doc, WarnEncrypted); n != 2 || len(w) != 2 || w[1] != "1: 2 images the chapter shows are encrypted; their data was not read" {
 		t.Errorf("%d images, %q", n, w)
+	}
+	if p.Has(gofastcore.WarnImageUnsupportedEncoding) {
+		t.Errorf("encrypted images counted as not decoded: %+v", p.Warnings)
+	}
+}
+
+// When the text budget stops the manifest's other items, the document
+// says what was not read, and keeps the stored part's warnings when
+// there is no stored part.
+func TestEPUBManifestBudget(t *testing.T) {
+	b := pub{chapters: []string{"c1.xhtml", xhtml("T", "<p>one</p>")},
+		manifestExtra: `<item id="p1" href="p1.png" media-type="image/png"/><item id="p2" href="p2.png" media-type="image/png"/>` +
+			`<item id="x" href="extra.xhtml" media-type="application/xhtml+xml"/>`,
+		files: []string{"OEBPS/p1.png", "\x89PNG1", "OEBPS/p2.png", "\x89PNG2", "OEBPS/extra.xhtml", xhtml("X", "<p>x</p>")}}.build(t)
+	full := extractEPUB(t, b, nil)
+	if len(full.Parts) != 2 || len(full.Parts[1].Blocks) != 2 || len(full.Children) != 1 {
+		t.Fatalf("%d parts, %d children", len(full.Parts), len(full.Children))
+	}
+	emptyStored := false
+	for limit := int64(1); limit < 2000; limit++ {
+		doc, err := extractBytes(b, &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: limit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(doc.Parts) == 2 && len(doc.Parts[1].Blocks) == 2 && len(doc.Children) == 1 {
+			break // nothing lost
+		}
+		if len(doc.Parts[0].Blocks) != 1 || doc.Parts[0].Name == "" {
+			continue // the chapter is cut: TestEPUBTextBudgetWarns
+		}
+		w := warnings(doc, gofastcore.WarnLimitExceeded)
+		if len(w) == 0 || !strings.HasPrefix(w[0], "0: ") || !strings.Contains(w[0], "1 embedded documents were not read") {
+			t.Fatalf("limit %d: %q", limit, w)
+		}
+		if len(doc.Parts) == 1 {
+			emptyStored = true
+			if !strings.Contains(w[0], "2 images and 1 embedded documents") {
+				t.Errorf("limit %d: %q", limit, w)
+			}
+		}
+	}
+	if !emptyStored {
+		t.Error("no limit left the stored part empty")
+	}
+}
+
+// A chapter whose name the text budget leaves out says so, also when it
+// carries another limit.exceeded; and the document names only what there
+// is after the chapter.
+func TestEPUBChapterNameBudget(t *testing.T) {
+	// Distinct formatting elements, past dom.MaxFormatting: each chapter
+	// carries limit.exceeded for that bound.
+	var bold strings.Builder
+	for i := range 70 {
+		fmt.Fprintf(&bold, "<b id=b%d>", i)
+	}
+	var chapters []string
+	for i := range 3 {
+		chapters = append(chapters, fmt.Sprintf("c%d.xhtml", i),
+			xhtml(fmt.Sprintf("LongChapterTitle%d", i), "<p>"+bold.String()+fmt.Sprintf("body%d</p><p>more</p>", i)))
+	}
+	b := chapterEPUB(t, chapters, "", "")
+	full := extractEPUB(t, b, nil)
+	if !full.Parts[0].Has(gofastcore.WarnLimitExceeded) {
+		t.Fatal("the formatting bound is not reached")
+	}
+	nameCut := false
+	for limit := int64(1); limit < 3000; limit++ {
+		doc, err := extractBytes(b, &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: limit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range warnings(doc, gofastcore.WarnLimitExceeded) {
+			if strings.Contains(w, "stored part") || strings.Contains(w, "embedded") {
+				t.Fatalf("limit %d names what the publication does not have: %q", limit, w)
+			}
+		}
+		for i, p := range doc.Parts {
+			if p.Name == "" && len(p.Blocks) == len(full.Parts[i].Blocks) {
+				nameCut = true
+				found := false
+				for _, w := range p.Warnings {
+					found = found || w.Code == gofastcore.WarnLimitExceeded && strings.Contains(w.Message, "chapter's name")
+				}
+				if !found {
+					t.Fatalf("limit %d, chapter %d: %+v", limit, p.Number, p.Warnings)
+				}
+			}
+		}
+		if len(doc.Parts) == len(full.Parts) && doc.Parts[len(doc.Parts)-1].Name != "" {
+			break
+		}
+	}
+	if !nameCut {
+		t.Error("no limit cut a chapter's name alone")
 	}
 }

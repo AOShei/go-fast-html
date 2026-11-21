@@ -352,6 +352,10 @@ type pageConfig struct {
 	internal func(ref string) bool
 	// charset is the caller's transport-layer encoding label.
 	charset string
+	// noDataElsewhere counts the images whose data image reported
+	// missing for a reason warned of elsewhere (a limit, encryption),
+	// which image.unsupported_encoding leaves out.
+	noDataElsewhere func() int
 }
 
 // page reads one document, an HTML page, Markdown or plain text, or a
@@ -463,9 +467,13 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	t.external += res.External
 	t.metaCut = t.metaCut || res.MetaCut
 	t.stored = append(t.stored, res.Stored...)
-	if res.ImageData > 0 && opts.Images == gofastcore.ImagesData {
+	noData := res.ImageData
+	if pc.noDataElsewhere != nil {
+		noData -= pc.noDataElsewhere()
+	}
+	if noData > 0 && opts.Images == gofastcore.ImagesData {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnImageUnsupportedEncoding,
-			fmt.Sprintf("%d images could not be decoded or read; their blocks have no data", res.ImageData))
+			fmt.Sprintf("%d images could not be decoded or read; their blocks have no data", noData))
 	}
 	if !res.Cut && !cut {
 		hasText := false

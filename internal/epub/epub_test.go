@@ -150,6 +150,9 @@ func TestEncryptionUnread(t *testing.T) {
 		{"cut short", "<encryption>" + entry + "<EncryptedData><Encryption", ErrMalformedXML},
 		{"not xml", "<encryption>\x00" + entry + "</encryption>", ErrMalformedXML},
 	} {
+		if c.want == ErrTooLarge && testing.Short() {
+			continue // a 16 MiB member
+		}
 		files := []string{"mimetype", "application/epub+zip"}
 		if c.xml != "" {
 			files = append(files, "META-INF/encryption.xml", c.xml)
@@ -171,6 +174,9 @@ func TestEncryptionUnread(t *testing.T) {
 // A container.xml or package document larger than MaxXML is an error
 // that says so, not a missing package.
 func TestPackageTooLarge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("16 MiB members")
+	}
 	_, budget := gofastcore.WithDecodeBudget(context.Background(), gofastcore.Limits{}, 1<<30)
 	container := `<container><rootfiles><rootfile full-path="p.opf"/></rootfiles></container>`
 	big := "<!--" + strings.Repeat("p", MaxXML) + "-->"
@@ -243,6 +249,9 @@ func TestTOCBounds(t *testing.T) {
 		t.Errorf("deep: %d entries, %+v", len(nav), cut)
 	}
 
+	if testing.Short() {
+		return // 100,000 entries
+	}
 	var ol, ncx strings.Builder
 	ol.WriteString("<ol>")
 	ncx.WriteString("<ncx><navMap>")

@@ -4,7 +4,11 @@
 
 Fixed bounds that cut or dropped content without saying so, and a warning
 that could repeat without bound. Output for input that reaches none of
-these bounds is unchanged.
+these bounds is unchanged, with two exceptions: an EPUB whose
+`encryption.xml` is damaged, truncated or otherwise unreadable now has
+its content withheld (below) instead of being read as if it had no
+encryption, and an EPUB with encrypted images now says so where they
+stand.
 
 - **EPUB `encryption.xml` that cannot be read in full** (larger than
   16 MiB or the decode budget, listing more than 2^20 members, damaged,
@@ -16,13 +20,17 @@ these bounds is unchanged.
   is read. With every selected chapter withheld the result is
   `ErrLimitExceeded` (too large, too many members) or `ErrMalformed`
   (damaged); a chapter withheld in a document that is returned carries
-  `part.failed` and `epub.encrypted`, and the document `limit.exceeded`
-  or `epub.encrypted`.
+  `part.failed` and `epub.encrypted`, the stored part `epub.encrypted`
+  for its images without data, and the document `limit.exceeded` or
+  `epub.encrypted`.
 - **EPUB text budget.** When the text budget stops the reading of
   chapters, the document carries `limit.exceeded` naming the chapter it
   was reached in; a chapter whose name was left out for the budget
-  carries `limit.exceeded`. Before, a budget spent on a chapter's name
-  ended the publication there silently.
+  carries `limit.exceeded`, also when it has another `limit.exceeded`.
+  Before, a budget spent on a chapter's name ended the publication there
+  silently. When the budget stops the manifest's other items, the
+  document says how many images and embedded documents were not read,
+  and carries the stored part's warnings when there is no stored part.
 - **EPUB table of contents.** A navigation document or NCX larger than
   16 MiB (or the decode budget), more than 100,000 entries, lists nested
   deeper than 64 levels and titles longer than 4 KiB are reported with
@@ -33,13 +41,17 @@ these bounds is unchanged.
   64 KiB however it is split (before, only text in several pieces was
   cut), and Dublin Core elements past 4096 are counted; both carry
   `html.metadata_truncated`.
-- **EPUB images.** An image no chapter shows whose data passes the decode
-  budget has `image.unsupported_encoding` and `limit.exceeded` on the
-  stored part, as a chapter's image has; a chapter's image whose data
-  passes it now also gives its chapter `limit.exceeded`.
-- **EPUB encrypted images shown by a chapter.** An image a chapter shows
-  that `encryption.xml` lists is no longer read as data: its block has
-  no data, and the chapter carries `epub.encrypted` with the count.
+- **EPUB images.** An image whose data passes the decode budget gives
+  its chapter, or the stored part for an image no chapter shows,
+  `limit.exceeded` with the count (before, a stored image's data was
+  dropped silently). `image.unsupported_encoding` now counts only images
+  that could not be read or decoded for other reasons.
+- **EPUB encrypted images.** An image a chapter shows that
+  `encryption.xml` lists is no longer read as data: its block has no
+  data, and the chapter carries `epub.encrypted` with the count. An
+  image no chapter shows that is (or, when `encryption.xml` was not read
+  in full, may be) encrypted gives the stored part `epub.encrypted` with
+  the count.
 - **EPUB `container.xml` or package document larger than 16 MiB** is
   `ErrLimitExceeded`, no longer `ErrMalformed`.
 - **`html.charset_unsupported`** is one warning for an EPUB, with the
