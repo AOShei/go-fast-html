@@ -1,13 +1,14 @@
-// Command gofasthtml extracts HTML, Markdown and plain text files into the
-// shared document model of the go-fast libraries and prints them as JSON,
-// Markdown or plain text.
+// Command gofasthtml extracts HTML, Markdown, plain text and EPUB files
+// into the shared document model of the go-fast libraries and prints them
+// as JSON, Markdown or plain text.
 //
 //	gofasthtml [flags] file-or-directory...
 //
 // The format of each input is decided by its extension (.html, .htm,
-// .md, .markdown, .txt, ...) and, failing that, by looking for markup in
-// it; -as sets it. A directory stands for the HTML, Markdown and text
-// files in it and below it; "-" is standard input. With one input the
+// .md, .markdown, .txt, .epub, ...) and, failing that, by its content: an
+// EPUB's mimetype member, or markup; -as sets it. A directory stands for
+// the HTML, Markdown, text and EPUB files in it and below it; "-" is
+// standard input. With one input the
 // JSON is indented; with several, each document is one line. Only the
 // documents go to standard output: everything said about them goes to
 // standard error, and the exit status is 1 if any input could not be read.
@@ -154,14 +155,15 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		maxBytes = flags.Int64("max-decoded-bytes", 0, "bytes decoded from a file (0: the default, 1 GiB; -1: no limit)")
 		maxText  = flags.Int64("max-text-bytes", 0, "bytes of text a document may hold (0: the default, 256 MiB; -1: no limit)")
 		quiet    = flags.Bool("quiet", false, "say nothing about files that were read; failures are still reported")
-		// The render flags shared by every go-fast command (COMMAND_FLAGS.md).
+		// The go-fast series' shared command flags, with the same names,
+		// values and meaning in every command.
 		furniture   = flags.Bool("furniture", false, "in Markdown and text, include running headers and footers")
 		partMarkers = flags.Bool("part-markers", false, "in Markdown and text, put a line before each part saying which part it is")
 		children    = flags.Bool("children", true, "in Markdown and text, include embedded documents (attachments, members), each after a line naming it; -children=false leaves them out")
 		version     = flags.Bool("version", false, "print the version and exit")
 	)
 	var stored storedFlag
-	flags.Var(&stored, "stored", "in Markdown and text, include stored data (data the file keeps but shows nowhere): all of it, or with =kinds only those kinds (such as markup_comment, field_code, macro)")
+	flags.Var(&stored, "stored", "in Markdown and text, include stored data (data the file keeps but shows nowhere): all of it, or with =kinds only those kinds (such as markup_comment, macro, stylesheet)")
 	var exclude displayFlag
 	flags.Var(&exclude, "exclude-display", "in Markdown and text, leave out what the file declares not displayed: all of it, or with =reasons only those reasons (hidden, no_ink); JSON always has everything")
 	flags.Usage = func() {

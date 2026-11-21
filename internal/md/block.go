@@ -1,9 +1,11 @@
 // Package md parses Markdown, following the block and inline structure of
-// CommonMark 0.31 (with GFM tables), and renders it to HTML as a CommonMark
-// renderer does, keeping a map from offsets in the HTML back to offsets in
-// the Markdown. The extractor reads that HTML with the same tree builder
-// and block walker as an HTML page, so raw HTML in Markdown gets the same
-// hidden-text checks, and every block's location is in the Markdown source.
+// CommonMark 0.31 (with the GFM tables, strikethrough, task lists and
+// extended autolinks), and renders it to HTML as a CommonMark renderer
+// does, keeping a map from offsets in the HTML back to offsets in the
+// Markdown. The extractor reads that HTML with the same tree builder and
+// block walker as an HTML page, so the display reasons raw HTML in
+// Markdown declares are read as in a page, and every block's location is
+// in the Markdown source.
 //
 // The parser follows the reference implementation's line-by-line
 // algorithm (commonmark.js): open containers are continued or closed, new

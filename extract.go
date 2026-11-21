@@ -34,7 +34,8 @@ const (
 
 // Warning codes specific to this library. Each states a fact about the
 // file. The codes shared by all go-fast libraries are in gofastcore; this
-// library raises these of them besides the ones about parts and limits:
+// library raises these of them besides the ones about parts and limits
+// (part.no_text, part.image_only, part.failed, limit.exceeded):
 //
 //	input.active_content      the page has scripts, event handler attributes
 //	                          or javascript: addresses; script text is read
@@ -48,6 +49,16 @@ const (
 //	                          appear as U+FFFD
 //	image.unsupported_encoding  image data was asked for and an inline
 //	                          data: image could not be decoded
+//	input.repaired            an EPUB's zip archive has no readable central
+//	                          directory and was read by its local headers
+//	input.ambiguous           a member name occurs twice in an EPUB's
+//	                          archive; the first is read
+//	child.encrypted           an embedded document of an EPUB is encrypted
+//	                          and was not opened
+//
+// An embedded document handed to gofastcore.Options.ExtractChild may also
+// carry child.not_extracted, child.unsupported or child.failed, which that
+// function sets. The EPUB codes are in epub.go.
 const (
 	// WarnCharsetUnsupported: the document declares a character encoding
 	// this library does not decode, and was read as windows-1252, so
@@ -65,11 +76,11 @@ const (
 	WarnMetadataTruncated = "html.metadata_truncated"
 )
 
-// Extractor extracts HTML, Markdown and plain text. The zero value is
-// ready to use and safe for concurrent use.
+// Extractor extracts HTML, Markdown, plain text and EPUB. The zero value
+// is ready to use and safe for concurrent use.
 type Extractor struct {
-	// Format is the format to read the input as: "html", "md" or "txt".
-	// Empty means to decide it with Detect.
+	// Format is the format to read the input as: "html", "md", "txt" or
+	// "epub". Empty means to decide it with Detect.
 	Format string
 	// MaxDepth bounds how deeply elements nest in the tree that is read.
 	// Zero means DefaultMaxDepth.
@@ -191,16 +202,23 @@ func (e *Extractor) ExtractFile(ctx context.Context, path string, opts *gofastco
 	return e.Extract(ctx, f, st.Size(), &o)
 }
 
-// Extract reads size bytes of HTML, Markdown or plain text from r, in the
-// format e.Format names or Detect decides from Options.Name and the
-// content, and returns the document: one part of kind body.
+// Extract reads size bytes of HTML, Markdown, plain text or EPUB from r,
+// in the format e.Format names or Detect decides from Options.Name and the
+// content, and returns the document. HTML, Markdown and plain text are one
+// part of kind body; an EPUB is a part of kind chapter for each chapter
+// of its spine. With the whole document (Options.Parts unset), script and
+// style text, hidden form values and an EPUB's images no chapter shows
+// follow in a part of kind stored.
 //
 // An error wraps one of the gofastcore errors: ErrLimitExceeded when the
-// input is larger than Limits.MaxInputBytes, ErrNoPartsSelected when
-// Options.Parts does not select part 1, ErrMalformed when r cannot be
-// read, ErrUnsupported for a Format this library does not have. Any input
-// that can be read is a document of its format: tag soup is recovered
-// from the way browsers recover from it.
+// input is larger than Limits.MaxInputBytes, or an EPUB's archive has more
+// members than MaxArchiveMembers; ErrNoPartsSelected when Options.Parts
+// selects no part (part 1 of HTML, Markdown or plain text, a chapter of
+// an EPUB); ErrMalformed when r cannot be read, or an EPUB's archive or
+// package document cannot be read; ErrUnsupported for a Format this library does not have, or an
+// EPUB whose selected chapters are all encrypted. Any input that can be
+// read is a document of its format: tag soup is recovered from the way
+// browsers recover from it.
 func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts *gofastcore.Options) (*gofastcore.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

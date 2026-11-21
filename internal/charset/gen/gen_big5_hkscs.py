@@ -3,15 +3,15 @@
 
 Usage: python3 internal/charset/gen/gen_big5_hkscs.py internal/charset
 
-Written by the orchestrator of the go-fast agents on 2026-11-20. The WHATWG
-Encoding Standard's Big5 index is Big5 with the Hong Kong Supplementary
-Character Set (HKSCS). Where code page 950 defines a byte pair, it agrees
-with that index (for example 0xA145 U+2027, 0xF9FE U+2593, 0xA3E1 U+20AC),
-so cp950.txt stays first. This file lists, from Python's big5hkscs codec,
-every pair code page 950 leaves undefined and big5hkscs decodes to one code
-point: lead and trail byte as four hex digits, then the code point. The
-pairs that decode to two code points (a letter and a combining mark) are
-printed on standard output, not listed; the decoder handles them in code.
+The WHATWG Encoding Standard's Big5 index is Big5 with the Hong Kong
+Supplementary Character Set (HKSCS). Where code page 950 defines a byte
+pair, it agrees with that index (for example 0xA145 U+2027, 0xF9FE U+2593,
+0xA3E1 U+20AC), so cp950.txt stays first. This file lists, from Python's
+big5hkscs codec, every pair code page 950 leaves undefined and big5hkscs
+decodes to one code point: lead and trail byte as four hex digits, then
+the code point. The pairs that decode to two code points (a letter and a
+combining mark) are printed on standard output, not listed; the decoder
+handles them in code.
 """
 import sys
 import os
