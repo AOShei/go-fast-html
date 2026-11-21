@@ -221,7 +221,7 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 			part.Warn(gofastcore.SeverityError, gofastcore.WarnPartFailed, "the chapter is encrypted and was not read")
 			part.Warn(gofastcore.SeverityError, WarnEncrypted, "encrypted with "+blocksLabel(encrypted[it.Path]))
 		default:
-			if err := e.chapter(ctx, a, pkg, it, opts, text, decode, &part, t, shown); err != nil {
+			if err := e.chapter(ctx, a, pkg, it, opts, text, decode, &part, t, shown, locked); err != nil {
 				return nil, err
 			}
 		}
@@ -339,7 +339,8 @@ func emptyChapter() gofastcore.Part {
 
 // chapter reads one content document of the spine into part.
 func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Package, it *epub.Item, opts *gofastcore.Options,
-	text *gofastcore.TextBudget, decode *gofastcore.DecodeBudget, part *gofastcore.Part, t *tally, shown map[string]bool) error {
+	text *gofastcore.TextBudget, decode *gofastcore.DecodeBudget, part *gofastcore.Part, t *tally, shown map[string]bool,
+	locked func(string) string) error {
 	b, err := a.Read(it.Path, decode, -1)
 	if err != nil {
 		if errors.Is(err, epub.ErrBudget) {
@@ -350,6 +351,7 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 		return nil
 	}
 	overBudget := 0 // images whose data passed the limit on decoded bytes
+	encImages := 0  // images encryption.xml lists, whose data is not read
 	pc := pageConfig{opts: opts, text: text, decode: decode,
 		xhtml: it.MediaType != "text/html",
 		image: func(src string) (blocks.ImageRef, bool) {
@@ -363,6 +365,10 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 				mime = item.MediaType
 			}
 			return blocks.ImageRef{ID: p, MIME: mime, Data: func() ([]byte, bool) {
+				if locked(p) != "" {
+					encImages++
+					return nil, false
+				}
 				d, err := a.Read(p, decode, -1)
 				if errors.Is(err, epub.ErrBudget) {
 					overBudget++
@@ -382,6 +388,10 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 	if overBudget > 0 {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			fmt.Sprintf("the limit on decoded bytes was reached; %d images have no data", overBudget))
+	}
+	if encImages > 0 {
+		part.Warn(gofastcore.SeverityError, WarnEncrypted,
+			fmt.Sprintf("%d images the chapter shows are encrypted; their data was not read", encImages))
 	}
 	if res != nil {
 		part.Name = res.Meta.Title

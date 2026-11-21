@@ -341,3 +341,27 @@ func TestBuilderBounds(t *testing.T) {
 		t.Errorf("the declared display past the bound: %+v", last)
 	}
 }
+
+// An image a chapter shows that encryption.xml lists has no data, and the
+// chapter says so.
+func TestEPUBEncryptedImage(t *testing.T) {
+	enc := `<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><EncryptedData xmlns="http://www.w3.org/2001/04/xmlenc#">` +
+		`<EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/><CipherData><CipherReference URI="OEBPS/pic.png"/></CipherData></EncryptedData></encryption>`
+	b := pub{chapters: []string{"c1.xhtml", xhtml("T", `<p>one</p><img src="pic.png" alt="p"/><img src="pic.png" alt="q"/>`)},
+		manifestExtra: `<item id="pic" href="pic.png" media-type="image/png"/>`,
+		files:         []string{"OEBPS/pic.png", "CIPHERTEXT", "META-INF/encryption.xml", enc}}.build(t)
+	doc := extractEPUB(t, b, &gofastcore.Options{Images: gofastcore.ImagesData})
+	p := doc.Parts[0]
+	n := 0
+	for _, bl := range p.Blocks {
+		if bl.Image != nil {
+			n++
+			if bl.Image.Data != nil {
+				t.Errorf("encrypted image data read: %q", bl.Image.Data)
+			}
+		}
+	}
+	if w := warnings(doc, WarnEncrypted); n != 2 || len(w) != 2 || w[1] != "1: 2 images the chapter shows are encrypted; their data was not read" {
+		t.Errorf("%d images, %q", n, w)
+	}
+}

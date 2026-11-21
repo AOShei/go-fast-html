@@ -37,6 +37,9 @@ these bounds is unchanged.
   budget has `image.unsupported_encoding` and `limit.exceeded` on the
   stored part, as a chapter's image has; a chapter's image whose data
   passes it now also gives its chapter `limit.exceeded`.
+- **EPUB encrypted images shown by a chapter.** An image a chapter shows
+  that `encryption.xml` lists is no longer read as data: its block has
+  no data, and the chapter carries `epub.encrypted` with the count.
 - **EPUB `container.xml` or package document larger than 16 MiB** is
   `ErrLimitExceeded`, no longer `ErrMalformed`.
 - **`html.charset_unsupported`** is one warning for an EPUB, with the
