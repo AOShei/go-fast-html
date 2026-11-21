@@ -6,9 +6,10 @@ import (
 )
 
 // The note an attribute's text becomes says so in Attrs: type
-// "attribute", and the attribute's name under "attribute".
+// "attribute" (core's NoteAttribute), and the attribute's name under
+// "attribute".
 const (
-	NoteAttribute = "attribute"
+	NoteAttribute = gofastcore.NoteAttribute
 	AttrAttribute = "attribute"
 	// AttrChecked is set on a list item that begins with a checkbox (a
 	// task-list item): "true" when checked, "false" when not.

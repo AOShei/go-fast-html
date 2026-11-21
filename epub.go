@@ -40,16 +40,14 @@ const (
 )
 
 // StoredManifestItem is the Attrs["stored"] value of an image the
-// publication stores and no chapter shows.
-const StoredManifestItem = "manifest_item"
+// publication stores and no chapter shows. It is core's
+// gofastcore.StoredManifestItem.
+const StoredManifestItem = gofastcore.StoredManifestItem
 
 // StoredStylesheet is the Attrs["stored"] value of the text of a style
-// element, kept in the stored part.
-const StoredStylesheet = blocks.StoredStylesheet
-
-// StoredKindNames lists the Attrs["stored"] values this library writes
-// beyond core's gofastcore.StoredKindNames. Do not modify it.
-var StoredKindNames = []string{StoredManifestItem, StoredStylesheet}
+// element, kept in the stored part. It is core's
+// gofastcore.StoredStylesheet.
+const StoredStylesheet = gofastcore.StoredStylesheet
 
 // epub reads an EPUB publication.
 func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []byte, opts *gofastcore.Options,

@@ -726,7 +726,7 @@ func (w *walker) script(n *dom.Node) {
 
 // StoredStylesheet is the Attrs["stored"] value of the text of a style
 // element in the stored part.
-const StoredStylesheet = "stylesheet"
+const StoredStylesheet = gofastcore.StoredStylesheet
 
 func (w *walker) comment(n *dom.Node) {
 	text := cleanProse(string(n.Text), false)
