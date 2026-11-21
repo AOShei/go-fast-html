@@ -461,7 +461,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	part.Blocks = res.Blocks
 	if res.Cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-			"the limit on the amount of text was reached; the "+part.Kind.String()+" is cut off there")
+			textCutMessage(part.Kind))
 	}
 	t.active += res.Active
 	t.external += res.External
@@ -495,6 +495,20 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	return res, nil
 }
 
+// textCutMessage is the message of the warning that the text budget cut
+// a part of kind k off.
+func textCutMessage(k gofastcore.PartKind) string {
+	return "the limit on the amount of text was reached; the " + k.String() + " is cut off there"
+}
+
+// count says n of a thing: "1 image", "2 images".
+func count(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
 // builderCaps warns of the bounds of the tree builder that were reached,
 // once each in the part.
 func builderCaps(part *gofastcore.Part, c dom.Caps) {
@@ -508,7 +522,7 @@ func builderCaps(part *gofastcore.Part, c dom.Caps) {
 	}
 	if c.Styles > 0 {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-			fmt.Sprintf("%d style attributes are longer than %d KiB; the declarations past %d KiB were not read", c.Styles, css.MaxLen>>10, css.MaxLen>>10))
+			fmt.Sprintf("%s longer than %d KiB; the declarations past %d KiB were not read", count(c.Styles, "style attribute is", "style attributes are"), css.MaxLen>>10, css.MaxLen>>10))
 	}
 }
 

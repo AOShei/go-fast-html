@@ -25,12 +25,21 @@ stand.
   `epub.encrypted`.
 - **EPUB text budget.** When the text budget stops the reading of
   chapters, the document carries `limit.exceeded` naming the chapter it
-  was reached in; a chapter whose name was left out for the budget
-  carries `limit.exceeded`, also when it has another `limit.exceeded`.
-  Before, a budget spent on a chapter's name ended the publication there
-  silently. When the budget stops the manifest's other items, the
-  document says how many images and embedded documents were not read,
-  and carries the stored part's warnings when there is no stored part.
+  was reached in and what was not read (the later chapters, the stored
+  part, the embedded documents, as the publication has them). A chapter
+  whose name was left out for the budget carries `limit.exceeded`, once:
+  when the budget also cut the chapter's text, that warning says the
+  name was left out too. Before, a budget spent on a chapter's name ended
+  the publication there silently. When the budget stops the manifest's
+  other items, the document says how many images and embedded documents
+  were not read (the item it stopped at counted there only), and carries
+  the stored part's warnings when there is no stored part.
+- **EPUB chapter limit.** Past `Limits.MaxParts`, the document's
+  `limit.exceeded` names what was not read (the later chapters, the
+  stored part, the embedded documents), no longer only "the rest".
+- **EPUB embedded documents past the decode budget** give the document
+  one `limit.exceeded` with their number, besides each child's
+  `child.not_extracted`.
 - **EPUB table of contents.** A navigation document or NCX larger than
   16 MiB (or the decode budget), more than 100,000 entries, lists nested
   deeper than 64 levels and titles longer than 4 KiB are reported with

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -345,7 +346,7 @@ func TestBuilderBounds(t *testing.T) {
 	}
 	// In an iframe srcdoc document too.
 	srcdoc := `<iframe srcdoc="&lt;p style='--pad:` + strings.Repeat("x", 16<<10) + `'&gt;f"></iframe><p>x</p>`
-	if w := limit(extract(t, srcdoc, nil)); len(w) != 1 || !strings.Contains(w[0], "style attributes") {
+	if w := limit(extract(t, srcdoc, nil)); len(w) != 1 || !strings.Contains(w[0], "1 style attribute is longer") {
 		t.Errorf("srcdoc style: %q", w)
 	}
 
@@ -420,12 +421,12 @@ func TestEPUBManifestBudget(t *testing.T) {
 			continue // the chapter is cut: TestEPUBTextBudgetWarns
 		}
 		w := warnings(doc, gofastcore.WarnLimitExceeded)
-		if len(w) == 0 || !strings.HasPrefix(w[0], "0: ") || !strings.Contains(w[0], "1 embedded documents were not read") {
+		if len(w) == 0 || !strings.HasPrefix(w[0], "0: ") || !strings.Contains(w[0], "1 embedded document were not read") {
 			t.Fatalf("limit %d: %q", limit, w)
 		}
 		if len(doc.Parts) == 1 {
 			emptyStored = true
-			if !strings.Contains(w[0], "2 images and 1 embedded documents") {
+			if !strings.Contains(w[0], "2 images and 1 embedded document were") {
 				t.Errorf("limit %d: %q", limit, w)
 			}
 		}
@@ -484,5 +485,102 @@ func TestEPUBChapterNameBudget(t *testing.T) {
 	}
 	if !nameCut {
 		t.Error("no limit cut a chapter's name alone")
+	}
+}
+
+// An embedded document past the decode budget is reported; with
+// Options.Child set it is read, so the budget is what leaves it out.
+func TestEPUBChildDecodeBudget(t *testing.T) {
+	b := pub{chapters: []string{"c1.xhtml", xhtml("T", "<p>one</p>")},
+		manifestExtra: `<item id="x" href="extra.xhtml" media-type="application/xhtml+xml"/>`,
+		files:         []string{"OEBPS/extra.xhtml", xhtml("X", "<p>"+strings.Repeat("x", 50000)+"</p>")}}.build(t)
+	child := func(ctx context.Context, name, mime string, r io.ReaderAt, size int64, o *gofastcore.Options) (*gofastcore.Document, error) {
+		return (&Extractor{Format: "html"}).Extract(ctx, r, size, o)
+	}
+	doc := extractEPUB(t, b, &gofastcore.Options{Child: child, Limits: gofastcore.Limits{MaxDecodedBytes: 20000}})
+	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || w[0] != "0: the limit on decoded bytes was reached; 1 embedded document was not read" {
+		t.Errorf("%q", w)
+	}
+	doc = extractEPUB(t, b, &gofastcore.Options{Child: child})
+	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 0 || len(doc.Children) != 1 || len(doc.Children[0].Parts) == 0 {
+		t.Errorf("within the budget: %q", w)
+	}
+}
+
+// The item the text budget stops at is counted as not read, not also by
+// why its data is missing.
+func TestEPUBStoredCutCountedOnce(t *testing.T) {
+	enc := `<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container">`
+	for _, p := range []string{"p1.png", "p2.png"} {
+		enc += `<EncryptedData xmlns="http://www.w3.org/2001/04/xmlenc#"><EncryptionMethod Algorithm="aes"/><CipherData><CipherReference URI="OEBPS/` + p + `"/></CipherData></EncryptedData>`
+	}
+	enc += `</encryption>`
+	b := pub{chapters: []string{"c1.xhtml", xhtml("T", "<p>one</p>")},
+		manifestExtra: `<item id="p1" href="p1.png" media-type="image/png"/><item id="p2" href="p2.png" media-type="image/png"/>`,
+		files:         []string{"OEBPS/p1.png", "C1", "OEBPS/p2.png", "C2", "META-INF/encryption.xml", enc}}.build(t)
+	seen := map[int]bool{}
+	for limit := int64(1); limit < 2000; limit++ {
+		doc, err := extractBytes(b, &gofastcore.Options{Images: gofastcore.ImagesData, Limits: gofastcore.Limits{MaxTextBytes: limit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed := 0
+		if p := doc.Parts[len(doc.Parts)-1]; p.Kind == gofastcore.PartStored {
+			listed = len(p.Blocks)
+		}
+		counted := 0
+		for _, w := range warnings(doc, WarnEncrypted) {
+			var n int
+			if _, err := fmt.Sscanf(w[strings.Index(w, " ")+1:], "%d image", &n); err == nil && strings.Contains(w, "their data was not read") {
+				counted += n
+			}
+		}
+		if counted != listed {
+			t.Fatalf("limit %d: %d images listed, %d counted as encrypted: %q", limit, listed, counted, warnings(doc, WarnEncrypted))
+		}
+		seen[listed] = true
+		if listed == 2 {
+			break
+		}
+	}
+	if !seen[0] || !seen[1] {
+		t.Errorf("listed counts seen: %v", seen)
+	}
+}
+
+// The chapter limit names what it leaves out.
+func TestEPUBMaxPartsNamesUnread(t *testing.T) {
+	var chapters []string
+	for i := range 3 {
+		chapters = append(chapters, fmt.Sprintf("c%d.xhtml", i), xhtml("T", "<p>x</p>"))
+	}
+	b := pub{chapters: chapters,
+		manifestExtra: `<item id="p" href="p.png" media-type="image/png"/><item id="x" href="extra.xhtml" media-type="application/xhtml+xml"/>`,
+		files:         []string{"OEBPS/p.png", "PNG", "OEBPS/extra.xhtml", xhtml("X", "<p>x</p>")}}.build(t)
+	doc := extractEPUB(t, b, &gofastcore.Options{Limits: gofastcore.Limits{MaxParts: 1}})
+	want := "0: the publication has more chapters than the limit of 1; the 2 chapters from chapter 2 on, the stored part and the 1 embedded document were not read"
+	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || w[0] != want {
+		t.Errorf("%q", w)
+	}
+	doc = extractEPUB(t, b, &gofastcore.Options{Limits: gofastcore.Limits{MaxParts: 2}, Parts: gofastcore.PartRange{First: 1, Last: 3}})
+	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || w[0] != "0: the publication has more chapters than the limit of 2; chapter 3 was not read" {
+		t.Errorf("%q", w)
+	}
+}
+
+// A chapter that the text budget cuts and whose name it leaves out has
+// one warning for that.
+func TestEPUBChapterCutAndName(t *testing.T) {
+	b := chapterEPUB(t, []string{"c1.xhtml", xhtml("Title", "<p>"+strings.Repeat("word ", 400)+"</p><p>"+strings.Repeat("more ", 400)+"</p>")}, "", "")
+	doc := extractEPUB(t, b, &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 2500}})
+	p := doc.Parts[0]
+	var text []string
+	for _, w := range p.Warnings {
+		if w.Code == gofastcore.WarnLimitExceeded && strings.HasPrefix(w.Message, "the limit on the amount of text") {
+			text = append(text, w.Message)
+		}
+	}
+	if p.Name != "" || len(text) != 1 || text[0] != "the limit on the amount of text was reached; the chapter is cut off there; the chapter's name was left out too" {
+		t.Errorf("name %q, %q", p.Name, text)
 	}
 }
