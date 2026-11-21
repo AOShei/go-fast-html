@@ -37,6 +37,33 @@ type Doc struct {
 	// Limited reports that a nesting bound was reached and the structure
 	// below it was flattened.
 	Limited bool
+	// Caps reports the other bounds of the builder that were reached.
+	Caps Caps
+}
+
+// Caps reports bounds of the builder, other than nesting, that were
+// reached. Text is never lost to them; what an element contributes
+// besides its text (its spans, the display it declares) may be.
+type Caps struct {
+	// Formatting: more than MaxFormatting formatting elements were in
+	// the list of those to reopen; the earliest were dropped from it.
+	Formatting bool
+	// Clones: the bound on formatting elements reopened after a block
+	// was reached; past it they apply but are not put in the tree.
+	Clones bool
+	// Styles counts style attributes longer than css.MaxLen, of which
+	// only the first css.MaxLen bytes were read.
+	Styles int
+}
+
+// Any reports whether a bound was reached.
+func (c Caps) Any() bool { return c.Formatting || c.Clones || c.Styles > 0 }
+
+// Add adds what o reports to c.
+func (c *Caps) Add(o Caps) {
+	c.Formatting = c.Formatting || o.Formatting
+	c.Clones = c.Clones || o.Clones
+	c.Styles += o.Styles
 }
 
 type entry struct {
@@ -58,6 +85,7 @@ type builder struct {
 	maxStack int
 	clones   int
 	limited  bool
+	caps     Caps
 	skipLF   bool
 	lastEnd  int
 	seenHTML bool
@@ -103,7 +131,7 @@ func Parse(ctx context.Context, src []byte, opt Options) (*Doc, error) {
 	}
 	b.lastEnd = len(src)
 	b.popTo(1)
-	return &Doc{Root: b.root, Limited: b.limited}, nil
+	return &Doc{Root: b.root, Limited: b.limited, Caps: b.caps}, nil
 }
 
 func (b *builder) top() *entry { return &b.stack[len(b.stack)-1] }
@@ -253,6 +281,9 @@ func (b *builder) style(attrs []lexer.Attr) *css.Style {
 		key := &attrs[i]
 		if st, ok := b.styles[key]; ok {
 			return st
+		}
+		if len(attrs[i].Value) > css.MaxLen {
+			b.caps.Styles++
 		}
 		st := css.Parse(attrs[i].Value)
 		if b.styles == nil {
@@ -689,7 +720,10 @@ func (b *builder) removeFromStack(n *Node) {
 	}
 }
 
-const maxAfe = 64
+// MaxFormatting bounds the list of formatting elements to reopen after
+// a block. It is a bound of this library, not of the HTML standard; past
+// it the earliest entry is dropped.
+const MaxFormatting = 64
 
 func (b *builder) pushAfe(n *Node) {
 	if !n.open {
@@ -706,7 +740,8 @@ func (b *builder) pushAfe(n *Node) {
 	if same >= 3 {
 		b.afe = append(b.afe[:first], b.afe[first+1:]...)
 	}
-	if len(b.afe) >= maxAfe {
+	if len(b.afe) >= MaxFormatting {
+		b.caps.Formatting = true
 		b.afe = append(b.afe[:0], b.afe[1:]...)
 	}
 	b.afe = append(b.afe, afeItem{node: n})
@@ -744,6 +779,9 @@ func (b *builder) reconstruct() {
 		// Past the bound on clones, the element still applies to what
 		// follows but is not put in the tree.
 		attach := b.clones > 0
+		if !attach {
+			b.caps.Clones = true
+		}
 		b.clones--
 		b.afe[i].node = b.insertAt(t, HTML, false, parent, ref, pst, attach)
 	}
