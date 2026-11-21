@@ -245,18 +245,8 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 			part.Name, nameCut = "", true
 		}
 		switch {
-		case nameCut && textWarned:
-			// One warning for the cap: the one that says the chapter is
-			// cut off says so of its name too.
-			for i := len(part.Warnings) - 1; i >= 0; i-- {
-				if w := &part.Warnings[i]; w.Code == gofastcore.WarnLimitExceeded && w.Message == textCutMessage(part.Kind) {
-					w.Message += "; the chapter's name was left out too"
-					break
-				}
-			}
 		case nameCut:
-			part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-				"the limit on the amount of text was reached at the chapter's name; it was left out")
+			nameLeftOut(&part, textWarned)
 		case text.Spent() && !textWarned:
 			part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 				"the limit on the amount of text was reached in the chapter")
@@ -305,6 +295,23 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 	return doc, nil
 }
 
+// nameLeftOut warns that the text budget left out the chapter's name:
+// once for the cap, so when the part already says the budget cut it off
+// (textWarned), that warning says so of the name too. When that warning
+// is not there to be found, the name has a warning of its own.
+func nameLeftOut(part *gofastcore.Part, textWarned bool) {
+	if textWarned {
+		for i := len(part.Warnings) - 1; i >= 0; i-- {
+			if w := &part.Warnings[i]; w.Code == gofastcore.WarnLimitExceeded && w.Message == textCutMessage(part.Kind) {
+				w.Message += "; the chapter's name was left out too"
+				return
+			}
+		}
+	}
+	part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+		"the limit on the amount of text was reached at the chapter's name; it was left out")
+}
+
 // unreadItem is a thing not read, for notRead.
 type unreadItem struct {
 	text string
@@ -313,8 +320,10 @@ type unreadItem struct {
 
 // unread lists what reading the chapters no further than n leaves
 // unread: the selected chapters after it, as chapters says them, and
-// with the whole document the stored part and the embedded documents,
-// when the publication has them.
+// with the whole document the stored part (the scripts, styles and form
+// values of the chapters read), the images of the manifest that no
+// chapter read shows (some may be ones a later chapter shows) and the
+// embedded documents, when the publication has them.
 func unread(a *epub.Archive, pkg *epub.Package, opts *gofastcore.Options, shown map[string]bool,
 	navPath, ncxPath string, t *tally, n int, chapters func(left int) string) []unreadItem {
 	var rest []unreadItem
@@ -323,8 +332,11 @@ func unread(a *epub.Archive, pkg *epub.Package, opts *gofastcore.Options, shown 
 	}
 	if opts.Parts == (gofastcore.PartRange{}) {
 		images, docs := manifestLeft(a, pkg, opts, shown, navPath, ncxPath, 0)
-		if len(t.stored) > 0 || images > 0 {
+		if len(t.stored) > 0 {
 			rest = append(rest, unreadItem{"the stored part", false})
+		}
+		if images > 0 {
+			rest = append(rest, unreadItem{count(images, "image", "images") + " of the manifest that no chapter read shows", images > 1})
 		}
 		if docs > 0 {
 			rest = append(rest, unreadItem{"the " + count(docs, "embedded document", "embedded documents"), docs > 1})
@@ -645,7 +657,9 @@ items:
 		doc.Parts = append(doc.Parts, stored)
 	} else {
 		// No stored part to carry what was found: the document does.
-		doc.Warnings = append(doc.Warnings, stored.Warnings...)
+		for _, w := range stored.Warnings {
+			doc.Warn(w.Severity, w.Code, w.Message)
+		}
 	}
 }
 

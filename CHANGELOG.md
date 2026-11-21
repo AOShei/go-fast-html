@@ -25,8 +25,10 @@ stand.
   `epub.encrypted`.
 - **EPUB text budget.** When the text budget stops the reading of
   chapters, the document carries `limit.exceeded` naming the chapter it
-  was reached in and what was not read (the later chapters, the stored
-  part, the embedded documents, as the publication has them). A chapter
+  was reached in and what was not read, as the publication has them: the
+  later chapters, the stored part (the scripts, styles and form values of
+  the chapters read), the images of the manifest no chapter read shows
+  (some may be ones a later chapter shows) and the embedded documents. A chapter
   whose name was left out for the budget carries `limit.exceeded`, once:
   when the budget also cut the chapter's text, that warning says the
   name was left out too. Before, a budget spent on a chapter's name ended
@@ -35,8 +37,8 @@ stand.
   were not read (the item it stopped at counted there only), and carries
   the stored part's warnings when there is no stored part.
 - **EPUB chapter limit.** Past `Limits.MaxParts`, the document's
-  `limit.exceeded` names what was not read (the later chapters, the
-  stored part, the embedded documents), no longer only "the rest".
+  `limit.exceeded` names what was not read, as the text budget's does,
+  no longer only "the rest".
 - **EPUB embedded documents past the decode budget** give the document
   one `limit.exceeded` with their number, besides each child's
   `child.not_extracted`.
@@ -53,8 +55,13 @@ stand.
 - **EPUB images.** An image whose data passes the decode budget gives
   its chapter, or the stored part for an image no chapter shows,
   `limit.exceeded` with the count (before, a stored image's data was
-  dropped silently). `image.unsupported_encoding` now counts only images
-  that could not be read or decoded for other reasons.
+  dropped silently). An image given as a `data:` URI whose bytes pass the
+  decode budget is not decoded, so it has no ID and no data; its part
+  now carries `limit.exceeded` with the count, in every images mode
+  (before, with `ImagesData` it counted under `image.unsupported_encoding`,
+  and otherwise it had no warning). `image.unsupported_encoding` now
+  counts only images that could not be read or decoded for other reasons
+  (a malformed `data:` URI, a damaged member).
 - **EPUB encrypted images.** An image a chapter shows that
   `encryption.xml` lists is no longer read as data: its block has no
   data, and the chapter carries `epub.encrypted` with the count. An

@@ -43,6 +43,10 @@ type Result struct {
 	// ImageData counts images given as data: URIs whose bytes could not
 	// be decoded.
 	ImageData int
+	// ImageBudget counts images given as data: URIs that were not
+	// decoded, their bytes passing the decode budget: they have no ID
+	// and no data.
+	ImageBudget int
 	// MetaCut reports a metadata value cut to MaxMeta.
 	MetaCut bool
 	// Images counts img elements, whether or not blocks were made.

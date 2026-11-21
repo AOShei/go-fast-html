@@ -110,15 +110,18 @@ func (w *walker) image(n *dom.Node) {
 		}
 	}
 	if data {
-		mime, bytes, ok := w.dataURI(src)
-		if ok {
+		mime, bytes, ok, overBudget := w.dataURI(src)
+		switch {
+		case overBudget:
+			w.res.ImageBudget++
+		case ok:
 			sum := sha256.Sum256(bytes)
 			img.ID = "sha256:" + hex.EncodeToString(sum[:16])
 			img.MIME = mime
 			if w.cfg.Images == gofastcore.ImagesData {
 				img.Data = bytes
 			}
-		} else {
+		default:
 			w.res.ImageData++
 		}
 	} else if ref, ok := w.resolve(src); ok {
@@ -157,11 +160,14 @@ func (w *walker) resolve(src string) (ImageRef, bool) {
 }
 
 // dataURI decodes a data: URI within the decode budget.
-func (w *walker) dataURI(s string) (mime string, data []byte, ok bool) {
+// dataURI decodes a data: URI. The bytes are decoded whatever the images
+// mode, since the image's ID is their hash. overBudget reports that they
+// would pass the decode budget and were not decoded.
+func (w *walker) dataURI(s string) (mime string, data []byte, ok, overBudget bool) {
 	rest := s[5:]
 	head, body, found := strings.Cut(rest, ",")
 	if !found {
-		return "", nil, false
+		return "", nil, false, false
 	}
 	params := strings.Split(head, ";")
 	mime = strings.ToLower(strings.TrimSpace(params[0]))
@@ -176,7 +182,7 @@ func (w *walker) dataURI(s string) (mime string, data []byte, ok bool) {
 		size = int64(base64.StdEncoding.DecodedLen(len(body)))
 	}
 	if !w.cfg.Decode.Take(size) {
-		return "", nil, false
+		return "", nil, false, true
 	}
 	if b64 {
 		clean := strings.Map(func(r rune) rune {
@@ -188,20 +194,20 @@ func (w *walker) dataURI(s string) (mime string, data []byte, ok bool) {
 		clean = strings.TrimRight(clean, "=")
 		d, err := base64.RawStdEncoding.DecodeString(clean)
 		if err != nil {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		data = d
 	} else {
 		d, err := url.PathUnescape(body)
 		if err != nil {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		data = []byte(d)
 	}
 	if strings.ContainsFunc(mime, func(r rune) bool { return r < 0x21 || r > 0x7E }) {
 		mime = ""
 	}
-	return mime, data, true
+	return mime, data, true, false
 }
 
 // textOf returns all text under n.

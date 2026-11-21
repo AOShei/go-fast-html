@@ -164,9 +164,10 @@ func TestDataURI(t *testing.T) {
 	if img := r.Blocks[0].Image; string(img.Data) != "hello there" || img.MIME != "text/plain" {
 		t.Errorf("first %+v", img)
 	}
-	// The second is past the decode budget.
-	if img := r.Blocks[1].Image; img.Data != nil || r.ImageData != 1 {
-		t.Errorf("second %+v, %d", img, r.ImageData)
+	// The second is past the decode budget: counted as such, not as an
+	// image that could not be decoded.
+	if img := r.Blocks[1].Image; img.Data != nil || img.ID != "" || r.ImageBudget != 1 || r.ImageData != 0 {
+		t.Errorf("second %+v, %d %d", img, r.ImageBudget, r.ImageData)
 	}
 }
 

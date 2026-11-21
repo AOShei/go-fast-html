@@ -467,6 +467,13 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	t.external += res.External
 	t.metaCut = t.metaCut || res.MetaCut
 	t.stored = append(t.stored, res.Stored...)
+	if n := res.ImageBudget; n > 0 {
+		msg := "the limit on decoded bytes was reached; 1 data: image was not decoded and has no ID or data"
+		if n > 1 {
+			msg = fmt.Sprintf("the limit on decoded bytes was reached; %d data: images were not decoded and have no ID or data", n)
+		}
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded, msg)
+	}
 	noData := res.ImageData
 	if pc.noDataElsewhere != nil {
 		noData -= pc.noDataElsewhere()

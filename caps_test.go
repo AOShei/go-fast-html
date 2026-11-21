@@ -3,6 +3,7 @@ package gofasthtml
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -558,7 +559,7 @@ func TestEPUBMaxPartsNamesUnread(t *testing.T) {
 		manifestExtra: `<item id="p" href="p.png" media-type="image/png"/><item id="x" href="extra.xhtml" media-type="application/xhtml+xml"/>`,
 		files:         []string{"OEBPS/p.png", "PNG", "OEBPS/extra.xhtml", xhtml("X", "<p>x</p>")}}.build(t)
 	doc := extractEPUB(t, b, &gofastcore.Options{Limits: gofastcore.Limits{MaxParts: 1}})
-	want := "0: the publication has more chapters than the limit of 1; the 2 chapters from chapter 2 on, the stored part and the 1 embedded document were not read"
+	want := "0: the publication has more chapters than the limit of 1; the 2 chapters from chapter 2 on, 1 image of the manifest that no chapter read shows and the 1 embedded document were not read"
 	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || w[0] != want {
 		t.Errorf("%q", w)
 	}
@@ -582,5 +583,47 @@ func TestEPUBChapterCutAndName(t *testing.T) {
 	}
 	if p.Name != "" || len(text) != 1 || text[0] != "the limit on the amount of text was reached; the chapter is cut off there; the chapter's name was left out too" {
 		t.Errorf("name %q, %q", p.Name, text)
+	}
+}
+
+// A data: image past the decode budget is reported as the limit, in
+// every images mode, and not as an image that could not be decoded.
+func TestDataImageDecodeBudget(t *testing.T) {
+	data := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x89, 'P', 'N', 'G'}, 1000))
+	page := `<p>text</p><img src="data:image/png;base64,@@@@" alt="b"><img src="data:image/png;base64,` + data + `" alt="a">`
+	for _, mode := range []gofastcore.ImageMode{gofastcore.ImagesMeta, gofastcore.ImagesData} {
+		doc := extract(t, page, &gofastcore.Options{Images: mode, Limits: gofastcore.Limits{MaxDecodedBytes: int64(len(page) + 100)}})
+		p := doc.Parts[0]
+		w := warnings(doc, gofastcore.WarnLimitExceeded)
+		if len(w) != 1 || w[0] != "1: the limit on decoded bytes was reached; 1 data: image was not decoded and has no ID or data" {
+			t.Errorf("mode %v: %q", mode, w)
+		}
+		if u := warnings(doc, gofastcore.WarnImageUnsupportedEncoding); mode == gofastcore.ImagesData && (len(u) != 1 || !strings.Contains(u[0], "1 images could not be decoded")) {
+			t.Errorf("mode %v: the malformed image: %q", mode, u)
+		}
+		if img := p.Blocks[2].Image; img.ID != "" || img.Data != nil {
+			t.Errorf("mode %v: %+v", mode, img)
+		}
+		// Within the budget: an ID, and no limit.
+		doc = extract(t, page, &gofastcore.Options{Images: mode})
+		if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 0 || !strings.HasPrefix(doc.Parts[0].Blocks[2].Image.ID, "sha256:") {
+			t.Errorf("mode %v within the budget: %q %+v", mode, w, doc.Parts[0].Blocks[2].Image)
+		}
+	}
+}
+
+// When the warning that the text budget cut a chapter off is not there
+// to say so of its name too, the name has its own warning.
+func TestNameLeftOut(t *testing.T) {
+	p := gofastcore.Part{Kind: gofastcore.PartChapter, Number: 1}
+	nameLeftOut(&p, true)
+	if len(p.Warnings) != 1 || !strings.Contains(p.Warnings[0].Message, "at the chapter's name") {
+		t.Errorf("without the cut warning: %+v", p.Warnings)
+	}
+	p = gofastcore.Part{Kind: gofastcore.PartChapter, Number: 1}
+	p.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded, textCutMessage(p.Kind))
+	nameLeftOut(&p, true)
+	if len(p.Warnings) != 1 || !strings.HasSuffix(p.Warnings[0].Message, "the chapter's name was left out too") {
+		t.Errorf("with the cut warning: %+v", p.Warnings)
 	}
 }
