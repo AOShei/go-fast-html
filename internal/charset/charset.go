@@ -12,8 +12,9 @@
 // standard also uses for every ISO-8859-1 and US-ASCII label), the
 // single-byte windows-874, windows-1250 to windows-1258 and macintosh, and
 // the double-byte Shift_JIS, GBK, EUC-KR and Big5, read with Microsoft's
-// code pages 932, 936, 949 and 950 (tables.go, dbcs.go). A label naming
-// any other encoding is recorded and not used.
+// code pages 932, 936, 949 and 950 (tables.go, dbcs.go), Big5 with the
+// HKSCS pairs code page 950 leaves undefined (big5-hkscs.txt). A label
+// naming any other encoding is recorded and not used.
 package charset
 
 import (
