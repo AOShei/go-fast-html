@@ -25,6 +25,8 @@ var (
 	ErrTooManyMembers = errors.New("the archive has more members than the limit")
 	// ErrBudget: reading a member would pass the limit on decoded bytes.
 	ErrBudget = errors.New("the limit on decoded bytes was reached")
+	// ErrTooLarge: a member is larger than the bound Read was given.
+	ErrTooLarge = errors.New("the member is larger than the limit")
 	// ErrMissing: no member has the name.
 	ErrMissing = errors.New("no such member")
 )
@@ -150,7 +152,8 @@ func (a *Archive) Get(name string) (*Member, bool) {
 
 // Read decompresses the named member, taking what it reads from budget,
 // and reads no more than limit bytes (negative: no limit beyond the
-// budget).
+// budget). A member larger than what is left of budget is ErrBudget; one
+// larger than limit, with more of budget left, is ErrTooLarge.
 func (a *Archive) Read(name string, budget *gofastcore.DecodeBudget, limit int64) ([]byte, error) {
 	m, ok := a.byName[name]
 	if !ok {
@@ -161,13 +164,17 @@ func (a *Archive) Read(name string, budget *gofastcore.DecodeBudget, limit int64
 		return nil, err
 	}
 	defer rc.Close()
-	most := max(budget.Left(), 0)
+	left := max(budget.Left(), 0)
+	most := left
 	if limit >= 0 {
 		most = min(most, limit)
 	}
 	b, err := io.ReadAll(io.LimitReader(rc, most+1))
 	if int64(len(b)) > most {
 		budget.Take(most)
+		if most < left {
+			return nil, ErrTooLarge
+		}
 		return nil, ErrBudget
 	}
 	budget.Take(int64(len(b)))

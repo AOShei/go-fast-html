@@ -31,7 +31,9 @@ const (
 	// It is extracted in its place in the spine.
 	WarnNonLinear = "epub.non_linear"
 	// WarnEncrypted: resources of the publication are encrypted (DRM)
-	// and were not read. Font obfuscation is not counted.
+	// and were not read. Font obfuscation is not counted. Also: the
+	// chapter may be encrypted, META-INF/encryption.xml not having been
+	// read in full, and was not read.
 	WarnEncrypted = "epub.encrypted"
 	// WarnMimetype: the archive's mimetype member is missing or does not
 	// say application/epub+zip; the archive was read as an EPUB all the
@@ -76,13 +78,33 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 	}
 	pkg, err := a.ReadPackage(decode)
 	if err != nil {
-		if decode.Left() < 0 {
+		if errors.Is(err, epub.ErrTooLarge) || errors.Is(err, epub.ErrBudget) {
 			return nil, fmt.Errorf("gofasthtml: %v: %w", err, gofastcore.ErrLimitExceeded)
 		}
 		return nil, fmt.Errorf("gofasthtml: %v: %w", err, gofastcore.ErrMalformed)
 	}
 	doc.Metadata = epubMetadata(pkg)
-	encrypted := a.Encryption(decode)
+	if pkg.MetaCut {
+		doc.Warn(gofastcore.SeverityInfo, WarnMetadataTruncated,
+			fmt.Sprintf("the text of a metadata element of the package document was cut at %d KiB", epub.MaxMeta>>10))
+	}
+	if pkg.DCLeftOut > 0 {
+		doc.Warn(gofastcore.SeverityInfo, WarnMetadataTruncated,
+			fmt.Sprintf("the package document has more than %d Dublin Core elements; %d were left out", epub.MaxDC, pkg.DCLeftOut))
+	}
+	encrypted, encErr := a.Encryption(decode)
+	locked := func(p string) string { return encrypted[p] }
+	if encErr != nil {
+		// Fail closed: encryption.xml was not read in full, so any
+		// member but the ones the standard keeps in the clear may be
+		// encrypted, and none is read as text.
+		locked = func(p string) string {
+			if p == "mimetype" || strings.HasPrefix(p, "META-INF/") || p == pkg.Path {
+				return ""
+			}
+			return unknownEncryption
+		}
+	}
 	t := &tally{}
 
 	// The table of contents, counted before the first part.
@@ -96,11 +118,15 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 	}
 	navPath := ""
 	var entries []epub.Entry
+	var tocCut epub.Cut
 	for _, it := range pkg.Manifest {
-		if hasProperty(it.Properties, "nav") && it.Path != "" && encrypted[it.Path] == "" {
-			if b, err := a.Read(it.Path, decode, epub.MaxXML); err == nil {
+		if hasProperty(it.Properties, "nav") && it.Path != "" && locked(it.Path) == "" {
+			b, err := a.Read(it.Path, decode, epub.MaxXML)
+			if err == nil {
 				navPath = it.Path
-				entries = epub.Nav(ctx, it.Path, b)
+				entries, tocCut = epub.Nav(ctx, it.Path, b)
+			} else {
+				tocLimit(doc, "navigation document", err)
 			}
 			break
 		}
@@ -116,10 +142,24 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 			}
 		}
 	}
-	if len(entries) == 0 && ncxPath != "" && encrypted[ncxPath] == "" {
+	if len(entries) == 0 && ncxPath != "" && locked(ncxPath) == "" {
 		if b, err := a.Read(ncxPath, decode, epub.MaxXML); err == nil {
-			entries = epub.NCX(ncxPath, b)
+			entries, tocCut = epub.NCX(ncxPath, b)
+		} else {
+			tocLimit(doc, "NCX", err)
 		}
+	}
+	if tocCut.Entries {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the table of contents has more than %d entries; the rest were not read", epub.MaxEntries))
+	}
+	if tocCut.Deep {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the table of contents has lists nested deeper than %d levels; those were not read", epub.MaxLevel))
+	}
+	if tocCut.Titles > 0 {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("%d titles in the table of contents are longer than %d KiB and were cut there", tocCut.Titles, epub.MaxTitle>>10))
 	}
 	names := map[int]string{}
 	for _, en := range entries {
@@ -171,7 +211,12 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 		switch {
 		case !ok || it.Path == "":
 			part.Warn(gofastcore.SeverityError, gofastcore.WarnPartFailed, "the spine names an item that is not in the manifest")
-		case encrypted[it.Path] != "":
+		case locked(it.Path) == unknownEncryption:
+			lockedChapters++
+			part.Warn(gofastcore.SeverityError, gofastcore.WarnPartFailed,
+				"META-INF/encryption.xml was not read in full, so whether the chapter is encrypted is not known; it was not read")
+			part.Warn(gofastcore.SeverityError, WarnEncrypted, "not known whether encrypted: META-INF/encryption.xml was not read in full")
+		case locked(it.Path) != "":
 			lockedChapters++
 			part.Warn(gofastcore.SeverityError, gofastcore.WarnPartFailed, "the chapter is encrypted and was not read")
 			part.Warn(gofastcore.SeverityError, WarnEncrypted, "encrypted with "+blocksLabel(encrypted[it.Path]))
@@ -186,20 +231,52 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 		if part.Name == "" {
 			part.Name = names[n]
 		}
+		nameCut := false
 		if part.Name != "" && !text.Take(len(part.Name)) {
-			part.Name = ""
+			part.Name, nameCut = "", true
+		}
+		if text.Spent() && !part.Has(gofastcore.WarnLimitExceeded) {
+			msg := "the limit on the amount of text was reached in the chapter"
+			if nameCut {
+				msg = "the limit on the amount of text was reached at the chapter's name; it was left out"
+			}
+			part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded, msg)
 		}
 		part.Finish()
 		doc.Parts = append(doc.Parts, part)
 		if text.Spent() {
 			cutShort = true
+			var rest []string
+			if left := selectedAfter(opts.Parts, n, len(pkg.Spine)); left > 0 {
+				rest = append(rest, fmt.Sprintf("the %d chapters after it", left))
+			}
+			if opts.Parts == (gofastcore.PartRange{}) {
+				rest = append(rest, "the stored part", "the embedded documents")
+			}
+			if k := len(rest); k > 0 {
+				list := rest[k-1]
+				if k > 1 {
+					list = strings.Join(rest[:k-1], ", ") + " and " + list
+				}
+				doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+					fmt.Sprintf("the limit on the amount of text was reached in chapter %d; %s were not read", n, list))
+			}
 			break
 		}
 	}
 	if selected > 0 && lockedChapters == selected {
+		if encErr != nil {
+			return nil, encryptionError(encErr)
+		}
 		return nil, fmt.Errorf("gofasthtml: every chapter is encrypted (DRM): %w", gofastcore.ErrUnsupported)
 	}
-	if len(encrypted) > 0 {
+	if encErr != nil {
+		code, sev := WarnEncrypted, gofastcore.SeverityError
+		if errors.Is(encryptionError(encErr), gofastcore.ErrLimitExceeded) {
+			code = gofastcore.WarnLimitExceeded
+		}
+		doc.Warn(sev, code, fmt.Sprintf("%v; which resources are encrypted is not known, so no content document of the publication was read", encErr))
+	} else if len(encrypted) > 0 {
 		doc.Warn(gofastcore.SeverityError, WarnEncrypted, fmt.Sprintf("%d resources are encrypted and were not read", len(encrypted)))
 	}
 	if len(doc.Parts) == 0 {
@@ -209,10 +286,48 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 	// What the publication stores beside its chapters, with the whole
 	// document only.
 	if opts.Parts == (gofastcore.PartRange{}) && !cutShort {
-		e.manifestRest(ctx, a, pkg, opts, text, decode, doc, shown, encrypted, navPath, ncxPath, t)
+		e.manifestRest(ctx, a, pkg, opts, text, decode, doc, shown, locked, navPath, ncxPath, t)
 	}
 	t.finish(doc)
 	return doc, nil
+}
+
+// selectedAfter counts the chapters past n, of the spine's last, that r
+// selects.
+func selectedAfter(r gofastcore.PartRange, n, last int) int {
+	c := 0
+	for i := n + 1; i <= last; i++ {
+		if r.Contains(i) {
+			c++
+		}
+	}
+	return c
+}
+
+// unknownEncryption stands for the algorithm of a member that may be
+// encrypted: META-INF/encryption.xml was not read in full.
+const unknownEncryption = "\x00unknown"
+
+// encryptionError is the error for a publication none of whose selected
+// chapters was read because encryption.xml could not be read in full.
+func encryptionError(err error) error {
+	if errors.Is(err, epub.ErrTooLarge) || errors.Is(err, epub.ErrBudget) || errors.Is(err, epub.ErrTooManyEntries) {
+		return fmt.Errorf("gofasthtml: %v; which chapters are encrypted is not known, so none was read: %w", err, gofastcore.ErrLimitExceeded)
+	}
+	return fmt.Errorf("gofasthtml: %v; which chapters are encrypted is not known, so none was read: %w", err, gofastcore.ErrMalformed)
+}
+
+// tocLimit warns that a table of contents document was not read for a
+// limit.
+func tocLimit(doc *gofastcore.Document, what string, err error) {
+	switch {
+	case errors.Is(err, epub.ErrTooLarge):
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the %s is larger than %d MiB and was not read; the outline has no entries from it", what, epub.MaxXML>>20))
+	case errors.Is(err, epub.ErrBudget):
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the limit on decoded bytes was reached at the %s, which was not read; the outline has no entries from it", what))
+	}
 }
 
 func emptyChapter() gofastcore.Part {
@@ -234,6 +349,7 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 		}
 		return nil
 	}
+	overBudget := 0 // images whose data passed the limit on decoded bytes
 	pc := pageConfig{opts: opts, text: text, decode: decode,
 		xhtml: it.MediaType != "text/html",
 		image: func(src string) (blocks.ImageRef, bool) {
@@ -248,6 +364,9 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 			}
 			return blocks.ImageRef{ID: p, MIME: mime, Data: func() ([]byte, bool) {
 				d, err := a.Read(p, decode, -1)
+				if errors.Is(err, epub.ErrBudget) {
+					overBudget++
+				}
 				return d, err == nil
 			}}, true
 		},
@@ -260,6 +379,10 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 	if err != nil {
 		return err
 	}
+	if overBudget > 0 {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the limit on decoded bytes was reached; %d images have no data", overBudget))
+	}
 	if res != nil {
 		part.Name = res.Meta.Title
 	}
@@ -271,7 +394,7 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 // documents.
 func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub.Package, opts *gofastcore.Options,
 	text *gofastcore.TextBudget, decode *gofastcore.DecodeBudget, doc *gofastcore.Document, shown map[string]bool,
-	encrypted map[string]string, navPath, ncxPath string, t *tally) {
+	locked func(string) string, navPath, ncxPath string, t *tally) {
 	inSpine := map[string]bool{}
 	for _, s := range pkg.Spine {
 		if it, ok := pkg.ByID[s.IDRef]; ok {
@@ -284,6 +407,8 @@ func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub
 	}
 	// The scripts and styles of the chapters come first.
 	stored := gofastcore.Part{Kind: gofastcore.PartStored, Number: last + 1, Blocks: t.stored}
+	noData, overBudget := 0, 0 // images whose data could not be read
+items:
 	for _, it := range pkg.Manifest {
 		if it.Path == "" || inSpine[it.Path] || it.Path == navPath || it.Path == ncxPath || !a.Has(it.Path) {
 			continue
@@ -295,9 +420,16 @@ func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub
 				continue
 			}
 			img := &gofastcore.Image{ID: it.Path, MIME: mt}
-			if opts.Images == gofastcore.ImagesData && encrypted[it.Path] == "" {
-				if d, err := a.Read(it.Path, decode, -1); err == nil {
+			if opts.Images == gofastcore.ImagesData && locked(it.Path) == "" {
+				d, err := a.Read(it.Path, decode, -1)
+				switch {
+				case err == nil:
 					img.Data = d
+				case errors.Is(err, epub.ErrBudget):
+					noData++
+					overBudget++
+				default:
+					noData++
 				}
 			}
 			b := gofastcore.Block{Kind: gofastcore.KindImage, Image: img,
@@ -307,7 +439,7 @@ func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub
 			}
 			if !text.Take(gofastcore.BlockCost + len(it.Path)*2 + len(img.Data)) {
 				stored.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded, "the limit on the amount of text was reached; the stored part is cut off there")
-				goto done
+				break items
 			}
 			stored.Blocks = append(stored.Blocks, b)
 		case mt == "text/css":
@@ -321,10 +453,15 @@ func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub
 			}
 			m, _ := a.Get(it.Path)
 			name := path.Base(it.Path)
-			if alg := encrypted[it.Path]; alg != "" {
+			if alg := locked(it.Path); alg != "" {
 				c := gofastcore.New("")
 				c.Source = gofastcore.Source{Name: name, MIME: mt, Size: m.Size}
-				c.Warn(gofastcore.SeverityError, gofastcore.WarnChildEncrypted, "encrypted with "+blocksLabel(alg)+"; not opened")
+				if alg == unknownEncryption {
+					c.Warn(gofastcore.SeverityError, gofastcore.WarnChildEncrypted,
+						"META-INF/encryption.xml was not read in full, so whether it is encrypted is not known; not opened")
+				} else {
+					c.Warn(gofastcore.SeverityError, gofastcore.WarnChildEncrypted, "encrypted with "+blocksLabel(alg)+"; not opened")
+				}
 				doc.Children = append(doc.Children, c)
 				continue
 			}
@@ -340,7 +477,14 @@ func (e *Extractor) manifestRest(ctx context.Context, a *epub.Archive, pkg *epub
 			doc.Children = append(doc.Children, opts.ExtractChild(ctx, name, mt, bytes.NewReader(data), int64(len(data))))
 		}
 	}
-done:
+	if noData > 0 {
+		stored.Warn(gofastcore.SeverityWarning, gofastcore.WarnImageUnsupportedEncoding,
+			fmt.Sprintf("%d images could not be decoded or read; their blocks have no data", noData))
+	}
+	if overBudget > 0 {
+		stored.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the limit on decoded bytes was reached; %d images have no data", overBudget))
+	}
 	if len(stored.Blocks) > 0 {
 		stored.Finish()
 		doc.Parts = append(doc.Parts, stored)

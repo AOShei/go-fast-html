@@ -17,17 +17,35 @@ type Entry struct {
 	Path string
 }
 
-// MaxEntries bounds the entries read from a table of contents.
-const MaxEntries = 100_000
+// Bounds of a table of contents.
+const (
+	// MaxEntries bounds the entries read; the rest are left out.
+	MaxEntries = 100_000
+	// MaxLevel bounds how deeply the lists of a navigation document are
+	// read; lists nested deeper are left out.
+	MaxLevel = 64
+	// MaxTitle bounds the length of an entry's title; the rest is cut
+	// off.
+	MaxTitle = 4 << 10
+)
+
+// Cut reports the bounds of a table of contents that were reached.
+type Cut struct {
+	Entries bool // there were more than MaxEntries entries
+	Deep    bool // lists were nested deeper than MaxLevel
+	Titles  int  // titles longer than MaxTitle, which were cut there
+}
 
 // NCX reads an EPUB 2 NCX document at ncxPath.
-func NCX(ncxPath string, b []byte) []Entry {
+func NCX(ncxPath string, b []byte) ([]Entry, Cut) {
 	var out []Entry
+	var cut Cut
 	var open []int // indexes in out of the navPoints open
 	d := decoder(b)
 	inText := false
-	var text strings.Builder
-	for len(out) < MaxEntries {
+	var text []byte
+	textCut := false
+	for {
 		tok, err := d.Token()
 		if err != nil {
 			break
@@ -36,11 +54,15 @@ func NCX(ncxPath string, b []byte) []Entry {
 		case xml.StartElement:
 			switch t.Name.Local {
 			case "navPoint":
+				if len(out) >= MaxEntries {
+					cut.Entries = true
+					return out, cut
+				}
 				out = append(out, Entry{Level: len(open) + 1})
 				open = append(open, len(out)-1)
 			case "text":
 				inText = len(open) > 0
-				text.Reset()
+				text, textCut = text[:0], false
 			case "content":
 				if len(open) > 0 {
 					e := &out[open[len(open)-1]]
@@ -50,8 +72,10 @@ func NCX(ncxPath string, b []byte) []Entry {
 				}
 			}
 		case xml.CharData:
-			if inText && text.Len() < 1<<12 {
-				text.Write(t)
+			if inText {
+				var c bool
+				text, c = appendCapped(text, t, MaxTitle)
+				textCut = textCut || c
 			}
 		case xml.EndElement:
 			switch t.Name.Local {
@@ -59,7 +83,10 @@ func NCX(ncxPath string, b []byte) []Entry {
 				if inText {
 					e := &out[open[len(open)-1]]
 					if e.Title == "" {
-						e.Title = text.String()
+						e.Title = string(text)
+						if textCut {
+							cut.Titles++
+						}
 					}
 				}
 				inText = false
@@ -70,15 +97,16 @@ func NCX(ncxPath string, b []byte) []Entry {
 			}
 		}
 	}
-	return out
+	return out, cut
 }
 
 // Nav reads the table of contents of an EPUB 3 navigation document at
 // navPath: the nav element whose epub:type includes "toc".
-func Nav(ctx context.Context, navPath string, b []byte) []Entry {
+func Nav(ctx context.Context, navPath string, b []byte) ([]Entry, Cut) {
+	var cut Cut
 	d, err := dom.Parse(ctx, b, dom.Options{XHTML: true})
 	if err != nil {
-		return nil
+		return nil, cut
 	}
 	nav := find(d.Root, func(n *dom.Node) bool {
 		if n.Name != "nav" {
@@ -93,14 +121,18 @@ func Nav(ctx context.Context, navPath string, b []byte) []Entry {
 		return false
 	})
 	if nav == nil {
-		return nil
+		return nil, cut
 	}
 	var out []Entry
 	var list func(ol *dom.Node, level int)
 	list = func(ol *dom.Node, level int) {
-		for li := ol.FirstChild; li != nil && len(out) < MaxEntries; li = li.Next {
+		for li := ol.FirstChild; li != nil && !cut.Entries; li = li.Next {
 			if li.Type != dom.ElementNode || li.Name != "li" {
 				continue
+			}
+			if len(out) >= MaxEntries {
+				cut.Entries = true
+				return
 			}
 			var sub *dom.Node
 			e := Entry{Level: level}
@@ -108,7 +140,11 @@ func Nav(ctx context.Context, navPath string, b []byte) []Entry {
 				switch {
 				case c.Type != dom.ElementNode:
 				case (c.Name == "a" || c.Name == "span") && e.Title == "":
-					e.Title = text(c)
+					var titleCut bool
+					e.Title, titleCut = text(c)
+					if titleCut {
+						cut.Titles++
+					}
 					if href, ok := c.Attr("href"); ok {
 						e.Path, _ = Resolve(navPath, href)
 					}
@@ -117,15 +153,28 @@ func Nav(ctx context.Context, navPath string, b []byte) []Entry {
 				}
 			}
 			out = append(out, e)
-			if sub != nil && level < 64 {
-				list(sub, level+1)
+			if sub != nil {
+				if level < MaxLevel {
+					list(sub, level+1)
+				} else if hasItem(sub) {
+					cut.Deep = true
+				}
 			}
 		}
 	}
 	if ol := find(nav, func(n *dom.Node) bool { return n.Name == "ol" || n.Name == "ul" }); ol != nil {
 		list(ol, 1)
 	}
-	return out
+	return out, cut
+}
+
+func hasItem(ol *dom.Node) bool {
+	for li := ol.FirstChild; li != nil; li = li.Next {
+		if li.Type == dom.ElementNode && li.Name == "li" {
+			return true
+		}
+	}
+	return false
 }
 
 func find(n *dom.Node, match func(*dom.Node) bool) *dom.Node {
@@ -143,18 +192,21 @@ func find(n *dom.Node, match func(*dom.Node) bool) *dom.Node {
 	return nil
 }
 
-func text(n *dom.Node) string {
-	var b strings.Builder
+// text returns the text of n, cut at MaxTitle bytes, and whether it was
+// cut.
+func text(n *dom.Node) (string, bool) {
+	var b []byte
+	cut := false
 	var walk func(*dom.Node)
 	walk = func(p *dom.Node) {
-		for c := p.FirstChild; c != nil && b.Len() < 1<<12; c = c.Next {
+		for c := p.FirstChild; c != nil && !cut; c = c.Next {
 			if c.Type == dom.TextNode {
-				b.Write(c.Text)
+				b, cut = appendCapped(b, c.Text, MaxTitle)
 			} else if c.Type == dom.ElementNode {
 				walk(c)
 			}
 		}
 	}
 	walk(n)
-	return b.String()
+	return string(b), cut
 }

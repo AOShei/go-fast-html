@@ -14,6 +14,7 @@ import (
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/blocks"
 	"github.com/AOShei/go-fast-html/internal/charset"
+	"github.com/AOShei/go-fast-html/internal/css"
 	"github.com/AOShei/go-fast-html/internal/dom"
 	"github.com/AOShei/go-fast-html/internal/md"
 )
@@ -63,7 +64,8 @@ const (
 	// WarnCharsetUnsupported: the document declares a character encoding
 	// this library does not decode, and was read as windows-1252, so
 	// letters outside ASCII may be wrong; or Extractor.Charset names one,
-	// and it was ignored.
+	// and it was ignored. An EPUB has one such warning for all its
+	// chapters, with their number and the labels.
 	WarnCharsetUnsupported = "html.charset_unsupported"
 	// WarnNestingFlattened: elements are nested deeper than the limit.
 	// Below it, elements were placed beside each other instead of inside
@@ -72,7 +74,9 @@ const (
 	WarnNestingFlattened = "html.nesting_flattened"
 	// WarnMetadataTruncated: a metadata value was longer than 64 KiB and
 	// was cut there, or there were more than 256 authors or keyword
-	// declarations and the rest were left out.
+	// declarations and the rest were left out; or an EPUB's package
+	// document has more than 4096 Dublin Core elements, and the rest were
+	// left out.
 	WarnMetadataTruncated = "html.metadata_truncated"
 )
 
@@ -211,12 +215,16 @@ func (e *Extractor) ExtractFile(ctx context.Context, path string, opts *gofastco
 // follow in a part of kind stored.
 //
 // An error wraps one of the gofastcore errors: ErrLimitExceeded when the
-// input is larger than Limits.MaxInputBytes, or an EPUB's archive has more
-// members than MaxArchiveMembers; ErrNoPartsSelected when Options.Parts
+// input is larger than Limits.MaxInputBytes, an EPUB's archive has more
+// members than MaxArchiveMembers, its container.xml or package document
+// is larger than 16 MiB or the decode budget, or its encryption.xml is
+// too large to be read in full; ErrNoPartsSelected when Options.Parts
 // selects no part (part 1 of HTML, Markdown or plain text, a chapter of
-// an EPUB); ErrMalformed when r cannot be read, or an EPUB's archive or
-// package document cannot be read; ErrUnsupported for a Format this library does not have, or an
-// EPUB whose selected chapters are all encrypted. Any input that can be
+// an EPUB); ErrMalformed when r cannot be read, or an EPUB's archive,
+// package document or encryption.xml cannot be read; ErrUnsupported for a
+// Format this library does not have, or an EPUB whose selected chapters
+// are all encrypted. An EPUB whose encryption.xml cannot be read in full
+// has no chapter read, since any may be encrypted. Any input that can be
 // read is a document of its format: tag soup is recovered from the way
 // browsers recover from it.
 func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts *gofastcore.Options) (*gofastcore.Document, error) {
@@ -286,7 +294,8 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 type tally struct {
 	active, external int
 	metaCut          bool
-	charsets         []string           // declared encodings not decoded
+	charsets         []string           // declared encodings not decoded, each once
+	charsetCount     map[string]int     // how many pages declare each
 	transport        string             // Extractor.Charset, when not decoded
 	stored           []gofastcore.Block // for the stored part
 }
@@ -297,9 +306,25 @@ func (t *tally) finish(doc *gofastcore.Document) {
 		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
 			fmt.Sprintf("the encoding %q was given with the input and is not decoded; it was ignored", t.transport))
 	}
-	for _, c := range t.charsets {
+	if len(t.charsets) == 1 && t.charsetCount[t.charsets[0]] == 1 {
 		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
-			fmt.Sprintf("the document declares the encoding %q, which is not decoded; it was read as windows-1252", c))
+			fmt.Sprintf("the document declares the encoding %q, which is not decoded; it was read as windows-1252", t.charsets[0]))
+	} else if len(t.charsets) > 0 {
+		// One warning for the document, however many chapters declare
+		// encodings: each label once, with the number of chapters.
+		pages := 0
+		var list []string
+		for i, c := range t.charsets {
+			pages += t.charsetCount[c]
+			if i < 8 {
+				list = append(list, fmt.Sprintf("%q in %d", c, t.charsetCount[c]))
+			}
+		}
+		if n := len(t.charsets) - len(list); n > 0 {
+			list = append(list, fmt.Sprintf("and %d more", n))
+		}
+		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
+			fmt.Sprintf("%d chapters declare an encoding that is not decoded (%s); they were read as windows-1252", pages, strings.Join(list, ", ")))
 	}
 	if t.active > 0 {
 		doc.Warn(gofastcore.SeverityInfo, gofastcore.WarnInputActiveContent,
@@ -343,7 +368,14 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		t.transport = blocksLabel(enc.Transport)
 	}
 	if enc.Unsupported {
-		t.charsets = append(t.charsets, blocksLabel(enc.Declared))
+		label := blocksLabel(enc.Declared)
+		if t.charsetCount[label] == 0 {
+			if t.charsetCount == nil {
+				t.charsetCount = map[string]int{}
+			}
+			t.charsets = append(t.charsets, label)
+		}
+		t.charsetCount[label]++
 	}
 	decoded, m, invalid, cut := charset.Decode(src, enc, max(decode.Left(), 0))
 	decode.Take(int64(len(decoded)))
@@ -419,6 +451,9 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			"the limit on decoded bytes was reached in an iframe srcdoc document; the rest of it was not read")
 	}
+	caps := tree.Caps
+	caps.Add(res.FrameCaps)
+	builderCaps(part, caps)
 	part.Blocks = res.Blocks
 	if res.Cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
@@ -450,6 +485,23 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	}
 	part.Finish()
 	return res, nil
+}
+
+// builderCaps warns of the bounds of the tree builder that were reached,
+// once each in the part.
+func builderCaps(part *gofastcore.Part, c dom.Caps) {
+	if c.Formatting {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("more than %d formatting elements (a, b, i, font and the like) were open at once; the earliest were dropped from the list of those reopened after a block, so text after a block that closed them does not have their spans, anchors or the display they declare", dom.MaxFormatting))
+	}
+	if c.Clones {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			"the bound on formatting elements reopened after blocks (a quarter of the input's size plus 4096) was reached; past it they apply to what follows but are not put in the tree, so that text does not have their spans or anchors")
+	}
+	if c.Styles > 0 {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("%d style attributes are longer than %d KiB; the declarations past %d KiB were not read", c.Styles, css.MaxLen>>10, css.MaxLen>>10))
+	}
 }
 
 // blocksLabel makes a declared encoding label safe to quote.
