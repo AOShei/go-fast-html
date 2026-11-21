@@ -2,7 +2,7 @@
 
 ## v0.1.0 (not yet tagged)
 
-The first release. Built on go-fast-core at `d4cd8e2`, schema `0.2`.
+The first release. Built on go-fast-core at `4499357`, schema `0.2`.
 Standard library and go-fast-core only.
 
 - **HTML.** An HTML5 tokenizer and tree builder of its own that recover
@@ -40,6 +40,17 @@ Standard library and go-fast-core only.
   `-children` and `-exclude-display[=reasons]`.
 
 ## Before v0.1.0
+
+### Core 4499357: closed value sets, shared render flags
+
+- go-fast-core pinned at `4499357`. The stored kinds `manifest_item` and
+  `stylesheet` and the note type `attribute` are now core's
+  (`gofastcore.StoredManifestItem`, `StoredStylesheet`, `NoteAttribute`);
+  `StoredManifestItem` and `StoredStylesheet` here are the same values.
+  `StoredKindNames` is removed: core's `StoredKindNames()` lists every kind.
+- Command: the render flags are core's `AddRenderFlags`; their names,
+  values and errors are unchanged, and `-stored`'s help text gives core's
+  examples.
 
 Development history. Nothing was released before v0.1.0.
 

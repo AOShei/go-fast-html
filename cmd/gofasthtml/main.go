@@ -50,92 +50,6 @@ var extensions = map[string]bool{
 	".epub": true,
 }
 
-// displayFlag is --exclude-display: given alone it stands for every
-// reason, and with a value for the reasons named.
-type displayFlag struct{ reasons gofastcore.Display }
-
-func (h *displayFlag) IsBoolFlag() bool { return true }
-func (h *displayFlag) String() string {
-	if h.reasons == 0 {
-		return ""
-	}
-	return h.reasons.String()
-}
-
-func (h *displayFlag) Set(v string) error {
-	switch v {
-	case "true", "all":
-		h.reasons = gofastcore.DisplayAny
-		return nil
-	case "false", "":
-		h.reasons = 0
-		return nil
-	}
-	var reasons gofastcore.Display
-	if err := reasons.UnmarshalText([]byte(strings.ReplaceAll(v, ",", "+"))); err != nil {
-		return err
-	}
-	if !reasons.Valid() || reasons == 0 || reasons&gofastcore.DisplayUnknown != 0 {
-		return fmt.Errorf("unknown reason in %q; the reasons are %s", v, strings.ReplaceAll((gofastcore.DisplayHidden|gofastcore.DisplayNoInk).String(), "+", ", "))
-	}
-	h.reasons = reasons
-	return nil
-}
-
-// storedFlag is -stored: given alone, =true or =all it stands for every
-// kind of stored data, and with =k1,k2 (or k1+k2) for the kinds named.
-type storedFlag struct {
-	all   bool
-	kinds []string
-}
-
-func (s *storedFlag) IsBoolFlag() bool { return true }
-func (s *storedFlag) String() string {
-	if s == nil {
-		return ""
-	}
-	if s.all {
-		return "all"
-	}
-	return strings.Join(s.kinds, ",")
-}
-
-// storedKinds is every kind -stored accepts: core's and this library's.
-func storedKinds() []string {
-	return append(append([]string(nil), gofastcore.StoredKindNames...), gofasthtml.StoredKindNames...)
-}
-
-func (s *storedFlag) Set(v string) error {
-	switch v {
-	case "true", "all":
-		s.all, s.kinds = true, nil
-		return nil
-	case "false", "":
-		s.all, s.kinds = false, nil
-		return nil
-	}
-	known := storedKinds()
-	var kinds []string
-	for _, k := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '+' }) {
-		ok := false
-		for _, n := range known {
-			if k == n {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return fmt.Errorf("unknown kind %q; the kinds are %s", k, strings.Join(known, ", "))
-		}
-		kinds = append(kinds, k)
-	}
-	if len(kinds) == 0 {
-		return fmt.Errorf("no kind in %q; the kinds are %s", v, strings.Join(known, ", "))
-	}
-	s.all, s.kinds = false, kinds
-	return nil
-}
-
 // run is the command: it reads args and writes documents to stdout and
 // messages to stderr, and returns the exit status.
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -155,17 +69,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		maxBytes = flags.Int64("max-decoded-bytes", 0, "bytes decoded from a file (0: the default, 1 GiB; -1: no limit)")
 		maxText  = flags.Int64("max-text-bytes", 0, "bytes of text a document may hold (0: the default, 256 MiB; -1: no limit)")
 		quiet    = flags.Bool("quiet", false, "say nothing about files that were read; failures are still reported")
-		// The go-fast series' shared command flags, with the same names,
-		// values and meaning in every command.
-		furniture   = flags.Bool("furniture", false, "in Markdown and text, include running headers and footers")
-		partMarkers = flags.Bool("part-markers", false, "in Markdown and text, put a line before each part saying which part it is")
-		children    = flags.Bool("children", true, "in Markdown and text, include embedded documents (attachments, members), each after a line naming it; -children=false leaves them out")
-		version     = flags.Bool("version", false, "print the version and exit")
+		version  = flags.Bool("version", false, "print the version and exit")
 	)
-	var stored storedFlag
-	flags.Var(&stored, "stored", "in Markdown and text, include stored data (data the file keeps but shows nowhere): all of it, or with =kinds only those kinds (such as markup_comment, macro, stylesheet)")
-	var exclude displayFlag
-	flags.Var(&exclude, "exclude-display", "in Markdown and text, leave out what the file declares not displayed: all of it, or with =reasons only those reasons (hidden, no_ink); JSON always has everything")
+	// The render flags shared by every go-fast command (COMMAND_FLAGS.md).
+	renderFlags := gofastcore.AddRenderFlags(flags)
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "usage: gofasthtml [flags] file-or-directory...")
 		fmt.Fprintln(stderr, "Extracts HTML, Markdown, plain text and EPUB. A directory stands for the files of those kinds in it and below it; - is standard input.")
@@ -291,14 +198,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	// The same options render every document this command prints, an
 	// EPUB's included; with Children core renders each embedded document
 	// after a line naming it, with these same options.
-	render := &gofastcore.RenderOptions{
-		Furniture:      *furniture,
-		Stored:         stored.all,
-		StoredKinds:    stored.kinds,
-		PartMarkers:    *partMarkers,
-		ExcludeDisplay: exclude.reasons,
-		Children:       *children,
-	}
+	render := &gofastcore.RenderOptions{}
+	renderFlags.Apply(render)
 
 	written := 0
 	for _, path := range inputs {

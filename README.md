@@ -17,7 +17,7 @@ The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directorie
 | Flag | Effect in Markdown and text |
 |---|---|
 | `-furniture` | include running headers and footers |
-| `-stored[=kinds]` | include stored data (data the file keeps but shows nowhere): all of it (`-stored`, `=true`, `=all`), or with `=kinds` (comma or `+`) only those kinds, wherever they are; `=false` or `=` turn it off. The kinds are core's `gofastcore.StoredKindNames` (such as `markup_comment`, `macro`, `form_field`) and this library's `manifest_item` and `stylesheet`; any other name is an error listing them (exit status 2) |
+| `-stored[=kinds]` | include stored data (data the file keeps but shows nowhere): all of it (`-stored`, `=true`, `=all`), or with `=kinds` (comma or `+`) only those kinds, wherever they are; `=false` or `=` turn it off. The kinds are core's `gofastcore.StoredKindNames()` (such as `markup_comment`, `macro`, `stylesheet`, `manifest_item`); any other name is an error listing them (exit status 2) |
 | `-part-markers` | put a line before each part saying which part it is |
 | `-children` (default true) | include embedded documents (an EPUB's documents beside its chapters), each after a line naming it (`[child 1: name]` in text); `-children=false` leaves them out |
 | `-exclude-display[=reasons]` | leave out what the file declares not displayed: all of it (alone, `=true` or `=all`), or only the reasons named (`=hidden`, `=no_ink`, `=hidden,no_ink`); `=false` or `=` is off, and any other value is an error |
