@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.1.1 (not yet tagged)
+
+Fixed bounds that cut or dropped content without saying so, and a warning
+that could repeat without bound. Output for input that reaches none of
+these bounds is unchanged.
+
+- **EPUB `encryption.xml` that cannot be read in full** (larger than
+  16 MiB or the decode budget, listing more than 2^20 members, damaged,
+  or XML that cannot be read to its end) no longer counts as no
+  encryption, which read encrypted chapters as text. Which members are
+  encrypted is then not known, so every member but `mimetype`,
+  `META-INF/` and the package document is treated as possibly encrypted:
+  no chapter, navigation document, NCX, image data or embedded document
+  is read. With every selected chapter withheld the result is
+  `ErrLimitExceeded` (too large, too many members) or `ErrMalformed`
+  (damaged); a chapter withheld in a document that is returned carries
+  `part.failed` and `epub.encrypted`, and the document `limit.exceeded`
+  or `epub.encrypted`.
+- **EPUB text budget.** When the text budget stops the reading of
+  chapters, the document carries `limit.exceeded` naming the chapter it
+  was reached in; a chapter whose name was left out for the budget
+  carries `limit.exceeded`. Before, a budget spent on a chapter's name
+  ended the publication there silently.
+- **EPUB table of contents.** A navigation document or NCX larger than
+  16 MiB (or the decode budget), more than 100,000 entries, lists nested
+  deeper than 64 levels and titles longer than 4 KiB are reported with
+  `limit.exceeded`, once each. A title is cut at 4 KiB whether its text
+  is one node or several (before, one long text node was not cut, and the
+  NCX's last entry at the bound lost its title).
+- **EPUB metadata.** The text of a metadata element is cut at exactly
+  64 KiB however it is split (before, only text in several pieces was
+  cut), and Dublin Core elements past 4096 are counted; both carry
+  `html.metadata_truncated`.
+- **EPUB images.** An image no chapter shows whose data passes the decode
+  budget has `image.unsupported_encoding` and `limit.exceeded` on the
+  stored part, as a chapter's image has; a chapter's image whose data
+  passes it now also gives its chapter `limit.exceeded`.
+- **EPUB `container.xml` or package document larger than 16 MiB** is
+  `ErrLimitExceeded`, no longer `ErrMalformed`.
+- **`html.charset_unsupported`** is one warning for an EPUB, with the
+  number of chapters and each label (the first 8) with its count, no
+  longer one per chapter.
+- **Tree builder bounds.** More than 64 formatting elements open at once
+  (the earliest are not reopened after a block), the bound on formatting
+  elements reopened (past it they are not put in the tree), and a `style`
+  attribute longer than 16 KiB (declarations past it are not read) each
+  give the part `limit.exceeded` once: these lose spans, anchors or a
+  declared display, never text. The bounds are unchanged.
+
 ## v0.1.0 (2026-11-21)
 
 The first release. Built on go-fast-core v0.1.0, schema `0.2`.
