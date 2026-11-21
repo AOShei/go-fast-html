@@ -43,6 +43,10 @@ type Result struct {
 	// ImageData counts images given as data: URIs whose bytes could not
 	// be decoded.
 	ImageData int
+	// ImageBudget counts images given as data: URIs that were not
+	// decoded, their bytes passing the decode budget: they have no ID
+	// and no data.
+	ImageBudget int
 	// MetaCut reports a metadata value cut to MaxMeta.
 	MetaCut bool
 	// Images counts img elements, whether or not blocks were made.
@@ -58,6 +62,9 @@ type Result struct {
 	// limit inside and was read side by side. FrameDecode: the decode
 	// budget ran out in a srcdoc document, which was cut there.
 	FrameDepth, FrameFlattened, FrameDecode bool
+	// FrameCaps reports the bounds of the tree builder reached in iframe
+	// srcdoc documents.
+	FrameCaps dom.Caps
 }
 
 // MaxMeta bounds the length of one metadata value.
@@ -492,6 +499,7 @@ func (w *walker) srcdoc(n *dom.Node, doc string) {
 	if tree.Limited {
 		w.res.FrameFlattened = true
 	}
+	w.res.FrameCaps.Add(tree.Caps)
 	outer := n
 	if w.frame != nil {
 		outer = w.frame

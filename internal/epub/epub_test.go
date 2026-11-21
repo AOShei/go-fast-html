@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
 )
@@ -42,14 +44,14 @@ func TestNCXUnbalanced(t *testing.T) {
 }
 
 func TestNCXAndNav(t *testing.T) {
-	ncx := NCX("OPS/toc.ncx", []byte(`<ncx><navMap><navPoint><navLabel><text>A</text></navLabel><content src="a.html"/>
+	ncx, _ := NCX("OPS/toc.ncx", []byte(`<ncx><navMap><navPoint><navLabel><text>A</text></navLabel><content src="a.html"/>
 <navPoint><navLabel><text>B</text></navLabel><content src="sub/b.html#f"/></navPoint></navPoint>
 <navPoint><navLabel><text>C</text></navLabel></navPoint></navMap></ncx>`))
 	want := []Entry{{"A", 1, "OPS/a.html"}, {"B", 2, "OPS/sub/b.html"}, {"C", 1, ""}}
 	if len(ncx) != 3 || ncx[0] != want[0] || ncx[1] != want[1] || ncx[2] != want[2] {
 		t.Errorf("NCX %+v", ncx)
 	}
-	nav := Nav(context.Background(), "OPS/nav.xhtml", []byte(`<html><body><nav epub:type="landmarks"><ol><li><a href="x.xhtml">L</a></li></ol></nav>
+	nav, _ := Nav(context.Background(), "OPS/nav.xhtml", []byte(`<html><body><nav epub:type="landmarks"><ol><li><a href="x.xhtml">L</a></li></ol></nav>
 <nav epub:type="toc"><h1>Contents</h1><ol><li><a href="a.xhtml">One <em>1</em></a><ol><li><span>Part</span></li></ol></li></ol></nav></body></html>`))
 	if len(nav) != 2 || nav[0].Title != "One 1" || nav[0].Path != "OPS/a.xhtml" || nav[1].Level != 2 || nav[1].Path != "" {
 		t.Errorf("Nav %+v", nav)
@@ -128,8 +130,145 @@ func TestPackageAndEncryption(t *testing.T) {
 	if len(p.Spine) != 1 || p.Spine[0].Linear || p.NCX != "n" {
 		t.Errorf("spine %+v %q", p.Spine, p.NCX)
 	}
-	enc := a.Encryption(budget)
-	if len(enc) != 1 || enc["pkg/a.xhtml"] != "aes" {
-		t.Errorf("encryption %v", enc)
+	enc, err := a.Encryption(budget)
+	if err != nil || len(enc) != 1 || enc["pkg/a.xhtml"] != "aes" {
+		t.Errorf("encryption %v %v", enc, err)
+	}
+}
+
+// An encryption.xml that cannot be read in full is an error, never an
+// empty list.
+func TestEncryptionUnread(t *testing.T) {
+	_, budget := gofastcore.WithDecodeBudget(context.Background(), gofastcore.Limits{}, 1<<30)
+	entry := `<EncryptedData><EncryptionMethod Algorithm="aes"/><CipherData><CipherReference URI="a.xhtml"/></CipherData></EncryptedData>`
+	for _, c := range []struct {
+		name, xml string
+		want      error
+	}{
+		{"none", "", nil},
+		{"big", "<encryption>" + entry + "<!--" + strings.Repeat("p", MaxXML) + "--></encryption>", ErrTooLarge},
+		{"cut short", "<encryption>" + entry + "<EncryptedData><Encryption", ErrMalformedXML},
+		{"not xml", "<encryption>\x00" + entry + "</encryption>", ErrMalformedXML},
+	} {
+		if c.want == ErrTooLarge && testing.Short() {
+			continue // a 16 MiB member
+		}
+		files := []string{"mimetype", "application/epub+zip"}
+		if c.xml != "" {
+			files = append(files, "META-INF/encryption.xml", c.xml)
+		}
+		a, _ := Open(zipOf(t, files...), -1)
+		enc, err := a.Encryption(budget)
+		if !errors.Is(err, c.want) || c.want == nil && err != nil || c.want != nil && enc != nil {
+			t.Errorf("%s: %v %v", c.name, enc, err)
+		}
+	}
+	// Past the limit on decoded bytes.
+	a, _ := Open(zipOf(t, "META-INF/encryption.xml", "<encryption>"+entry+"</encryption>"), -1)
+	_, small := gofastcore.WithDecodeBudget(context.Background(), gofastcore.Limits{MaxDecodedBytes: 10}, 0)
+	if enc, err := a.Encryption(small); !errors.Is(err, ErrBudget) || enc != nil {
+		t.Errorf("budget: %v %v", enc, err)
+	}
+}
+
+// A container.xml or package document larger than MaxXML is an error
+// that says so, not a missing package.
+func TestPackageTooLarge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("16 MiB members")
+	}
+	_, budget := gofastcore.WithDecodeBudget(context.Background(), gofastcore.Limits{}, 1<<30)
+	container := `<container><rootfiles><rootfile full-path="p.opf"/></rootfiles></container>`
+	big := "<!--" + strings.Repeat("p", MaxXML) + "-->"
+	for _, files := range [][]string{
+		{"META-INF/container.xml", container + big, "p.opf", "<package/>"},
+		{"META-INF/container.xml", container, "p.opf", "<package/>" + big},
+	} {
+		a, _ := Open(zipOf(t, files...), -1)
+		if _, err := a.ReadPackage(budget); !errors.Is(err, ErrTooLarge) {
+			t.Errorf("%s: %v", files[1][:20], err)
+		}
+	}
+}
+
+// The metadata of the package document: a value cut at MaxMeta wherever
+// its text is split, and elements past MaxDC counted.
+func TestPackageMetadataBounds(t *testing.T) {
+	long := strings.Repeat("w", MaxMeta+100)
+	for _, desc := range []string{long, long[:MaxMeta/2] + "<!--c-->" + long[MaxMeta/2:]} {
+		p := parsePackage("p.opf", []byte(`<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description>`+desc+`</dc:description></metadata></package>`))
+		if len(p.DC) != 1 || len(p.DC[0].Value) != MaxMeta || !p.MetaCut {
+			t.Errorf("description of %d bytes, cut %v", len(p.DC[0].Value), p.MetaCut)
+		}
+	}
+	p := parsePackage("p.opf", []byte(`<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>`+long[:MaxMeta]+`</dc:title></metadata></package>`))
+	if p.MetaCut || len(p.DC[0].Value) != MaxMeta {
+		t.Errorf("a value of exactly MaxMeta bytes: cut %v", p.MetaCut)
+	}
+	var b strings.Builder
+	b.WriteString(`<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">`)
+	for range MaxDC + 7 {
+		b.WriteString("<dc:creator>C</dc:creator>")
+	}
+	b.WriteString("</metadata></package>")
+	p = parsePackage("p.opf", []byte(b.String()))
+	if len(p.DC) != MaxDC || p.DCLeftOut != 7 || p.MetaCut {
+		t.Errorf("%d elements, %d left out", len(p.DC), p.DCLeftOut)
+	}
+}
+
+// The bounds of a table of contents are reported, and a title is cut at
+// MaxTitle however its text is split.
+func TestTOCBounds(t *testing.T) {
+	ctx := context.Background()
+	navDoc := func(ol string) []byte {
+		return []byte(`<html xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc">` + ol + `</nav></body></html>`)
+	}
+	long := strings.Repeat("t", MaxTitle+50)
+	for _, a := range []string{long, "<span>" + long[:100] + "</span><span>" + long[100:] + "</span>", long[:MaxTitle-1] + "\u00e9" + long} {
+		nav, cut := Nav(ctx, "nav.xhtml", navDoc(`<ol><li><a href="a.xhtml">`+a+`</a></li></ol>`))
+		if len(nav) != 1 || len(nav[0].Title) > MaxTitle || len(nav[0].Title) < MaxTitle-1 || cut.Titles != 1 || !utf8.ValidString(nav[0].Title) {
+			t.Errorf("nav title of %d bytes, cut %+v", len(nav[0].Title), cut)
+		}
+	}
+	for _, x := range []string{long, long[:100] + "<!--c-->" + long[100:]} {
+		ncx, cut := NCX("toc.ncx", []byte(`<ncx><navMap><navPoint><navLabel><text>`+x+`</text></navLabel></navPoint></navMap></ncx>`))
+		if len(ncx) != 1 || len(ncx[0].Title) != MaxTitle || cut.Titles != 1 {
+			t.Errorf("ncx title of %d bytes, cut %+v", len(ncx[0].Title), cut)
+		}
+	}
+	if nav, cut := Nav(ctx, "nav.xhtml", navDoc(`<ol><li><a href="a.xhtml">`+long[:MaxTitle]+`</a></li></ol>`)); cut != (Cut{}) || len(nav[0].Title) != MaxTitle {
+		t.Errorf("a title of exactly MaxTitle bytes: %+v", cut)
+	}
+
+	deep := ""
+	for i := MaxLevel + 3; i > 0; i-- {
+		deep = `<ol><li><a href="a.xhtml">L</a>` + deep + `</li></ol>`
+	}
+	if nav, cut := Nav(ctx, "nav.xhtml", navDoc(deep)); len(nav) != MaxLevel || !cut.Deep || cut.Entries {
+		t.Errorf("deep: %d entries, %+v", len(nav), cut)
+	}
+
+	if testing.Short() {
+		return // 100,000 entries
+	}
+	var ol, ncx strings.Builder
+	ol.WriteString("<ol>")
+	ncx.WriteString("<ncx><navMap>")
+	for range MaxEntries + 2 {
+		ol.WriteString(`<li><a href="a.xhtml">E</a></li>`)
+		ncx.WriteString(`<navPoint><navLabel><text>E</text></navLabel></navPoint>`)
+	}
+	ol.WriteString("</ol>")
+	ncx.WriteString("</navMap></ncx>")
+	if nav, cut := Nav(ctx, "nav.xhtml", navDoc(ol.String())); len(nav) != MaxEntries || !cut.Entries {
+		t.Errorf("nav: %d entries, %+v", len(nav), cut)
+	}
+	if got, cut := NCX("toc.ncx", []byte(ncx.String())); len(got) != MaxEntries || !cut.Entries || got[MaxEntries-1].Title != "E" {
+		t.Errorf("ncx: %d entries, %+v", len(got), cut)
+	}
+	// Exactly MaxEntries is not cut.
+	if got, cut := NCX("toc.ncx", []byte(strings.Replace(ncx.String(), `<navPoint><navLabel><text>E</text></navLabel></navPoint>`, "", 2))); len(got) != MaxEntries || cut.Entries {
+		t.Errorf("ncx exact: %d entries, %+v", len(got), cut)
 	}
 }
