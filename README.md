@@ -24,7 +24,7 @@ The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directorie
 
 This library produces no running headers and footers itself; `-furniture` is there for the documents other extractors may return as children. Its stored part holds scripts, styles, `<input type=hidden>` values and EPUB images no chapter shows; markup comments are stored data too, kept where they stand. `-stored=markup_comment` shows the comments alone (Outlook's conditional comments, for example), `-stored=macro` the scripts, `-stored=stylesheet` the styles.
 
-**Status: v0.1.0 (2026-11-21).** The changes are in [`CHANGELOG.md`](CHANGELOG.md); the development history and the items still open are in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
+**Status: v0.1.1 (2026-11-22).** The changes are in [`CHANGELOG.md`](CHANGELOG.md); the development history and the items still open are in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
 ## What is read
 

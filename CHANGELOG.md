@@ -1,7 +1,9 @@
 # Changelog
 
-## v0.1.1 (not yet tagged)
+## v0.1.1 (2026-11-22)
 
+- Built on go-fast-core v0.1.1: a part or document keeps at most 1,000
+  warnings, and the rest are counted in one `warnings.omitted` warning.
 Fixed bounds that cut or dropped content without saying so, and a warning
 that could repeat without bound. Output for input that reaches none of
 these bounds is unchanged, with two exceptions: an EPUB whose

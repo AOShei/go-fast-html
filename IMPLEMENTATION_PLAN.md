@@ -8,8 +8,8 @@ HTML, Markdown, plain text and EPUB into the go-fast-core model: one
 `body` part for HTML, Markdown and plain text, a `chapter` part for each
 chapter of an EPUB, and a `stored` part for stored data;
 `Loc.Offset`/`Length` are byte offsets into the source (for an EPUB, into
-the chapter's file); `Loc.Anchor` from `id`. go-fast-core pinned at
-commit d4cd8e2, schema 0.2 (`v0.0.0-20261120143830-d4cd8e285190`).
+the chapter's file); `Loc.Anchor` from `id`. Built on
+go-fast-core v0.1.1, schema 0.2.
 
 ## Layout
 
