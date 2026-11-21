@@ -12,7 +12,7 @@ fmt.Print(doc.Markdown())
 
 `Source.Format` is `html`, `md`, `txt` or `epub`. `Extractor.Format` sets the format; when it is empty, `Detect` decides it from `Options.Name` (`.html`, `.htm`, `.xhtml`, `.shtml`; `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`; `.txt`, `.text`; `.epub`) and, failing that, from the content: a zip archive whose `mimetype` member comes first and says `application/epub+zip` is EPUB, input that begins with markup, or has a tag of a common HTML element in its first 4 KiB, is HTML, and anything else plain text. Markdown is never guessed from content, since reading plain text as Markdown takes characters out of it.
 
-The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directories and standard input (`-`); `-as html|md|txt` sets the format. It offers the render flags every go-fast command shares; they affect Markdown and text only, for the document and an EPUB's documents alike, and JSON always has everything:
+The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directories and standard input (`-`); `-as html|md|txt|epub` sets the format. It offers the render flags every go-fast command shares; they affect Markdown and text only, for the document and an EPUB's documents alike, and JSON always has everything:
 
 | Flag | Effect in Markdown and text |
 |---|---|
@@ -42,11 +42,11 @@ Markdown (`internal/md`) is parsed with the block and inline structure of Common
 
 **Conformance: all 652 examples of the CommonMark 0.31.2 spec pass**, compared after the normalization of the reference test runner (`normalize.py`). The test (`commonmark_test.go`) reads the spec's JSON from outside the repository (`$GOFASTHTML_COMMONMARK_SPEC`, by default `../.testdata/commonmark-0.31.2-spec.json`; the spec is CC-BY-SA 4.0) and is skipped without it; examples that fail are listed in it with the reason, and the list is empty. The spec is checked with link addresses percent-encoded as the reference renderer encodes them; in extraction a link's address is kept as the source writes it.
 
-GitHub Flavored Markdown extensions read: tables; strikethrough (`~~a~~` or `~a~`, a `strike` span); task-list items (`- [ ]`, `- [x]`: the marker is taken out of the text and the item has `Attrs["checked"]` `"false"` or `"true"`; an HTML list item that begins with a checkbox gets the same); extended autolinks (bare `www.`, `http://` and `https://` addresses, `www.` ones linked as `http://`). Not read: footnotes and the disallowed-raw-HTML filter (raw HTML is read as a page's is). Front matter is not recognized.
+GitHub Flavored Markdown extensions read: tables; strikethrough (`~~a~~` or `~a~`, a `strike` span); task-list items (`- [ ]`, `- [x]`: the marker is taken out of the text and the item has `Attrs["checked"]` `"false"` or `"true"`; an HTML list item that begins with a checkbox gets the same); extended autolinks (bare `www.`, `http://` and `https://` addresses, `www.` ones linked as `http://`). Not read: footnotes, extended email autolinks (a bare address such as `user@example.com` stays text; `<user@example.com>` is a CommonMark autolink and is read) and the disallowed-raw-HTML filter (raw HTML is read as a page's is). Front matter is not recognized.
 
 The document is rendered to HTML as a CommonMark renderer does and read by the HTML path above, so the blocks come out as in the table below (emphasis markers are gone; a link is a link span; code is declared code, verbatim, with the fence's language). Raw HTML in Markdown is read exactly as in a page: its declarations give the same display reasons, and an HTML comment is a `note` marked `Attrs["stored"]` `markup_comment`. `Loc.Offset` and `Loc.Length` are into the Markdown source: the lines of the Markdown block a block came from, and for raw HTML the exact bytes of its element.
 
-Encoding: a byte order mark, else UTF-8 if valid, else windows-1252.
+Encoding: a byte order mark, then `Extractor.Charset`, else UTF-8 if the whole input is valid UTF-8, else windows-1252. Markdown has no `<meta>` prescan.
 
 ### Plain text
 
@@ -66,7 +66,7 @@ EPUB 2 and 3 publications (`Source.Format` `epub`, `.epub` or a zip whose first 
 
 ## How HTML maps
 
-One part of kind `body`, numbered 1. Every block has `Loc.Offset` and `Loc.Length`, its byte range in the source file (also when the file is UTF-16 or windows-1252), and `Loc.Anchor` from the `id` of its element, or of an element in it (`<a name>` counts).
+One part of kind `body`, numbered 1, and, when the page has script or style text or `<input type=hidden>` values and `Options.Parts` is unset, a part of kind `stored`, numbered 2, that holds them. Every block has `Loc.Offset` and `Loc.Length`, its byte range in the source file (also when the file is UTF-16 or windows-1252), and `Loc.Anchor` from the `id` of its element, or of an element in it (`<a name>` counts).
 
 | HTML | Block |
 |---|---|
@@ -88,7 +88,8 @@ One part of kind `body`, numbered 1. Every block has `Loc.Offset` and `Loc.Lengt
 | `script`, `style` | in the `stored` part as `code` (language `javascript`, `json` or `css`), verbatim, read as data and never run, with `Attrs["stored"]` `macro` (core's `StoredMacro`) for a script and `stylesheet` for a style element; no display reason |
 | `template` | read as text where it stands, with the reason `hidden` (its content is inert by the element's definition) |
 | `noscript`, `noembed`, `noframes`, `iframe` fallback, closed `details`/`dialog`, `rp` | read as text where they stand; no display reason |
-| `iframe srcdoc` | the document in the attribute is parsed as HTML and its blocks come where the iframe stands, before any fallback text; `Loc` is the (outermost) iframe element in the page; what the iframe declares (`hidden`, inline `display:none`, ...) is added to all of it, what the inner document declares applies inside; its `title`, `meta` and `lang` are not the page's metadata and are not read. Its elements count from the iframe's depth against `Extractor.MaxDepth`: a srcdoc document whose iframe is at the limit is not read (`limit.exceeded`). Its bytes count against the decode budget (cut with `limit.exceeded`) and its text against the text budget. An iframe with only `src` is as before. |
+| `iframe srcdoc` | the document in the attribute is parsed as HTML and its blocks come where the iframe stands, before any fallback text; `Loc` is the (outermost) iframe element in the page; what the iframe declares (`hidden`, inline `display:none`, ...) is added to all of it, what the inner document declares applies inside; its `title`, `meta` and `lang` are not the page's metadata and are not read. Its elements count from the iframe's depth against `Extractor.MaxDepth`: a srcdoc document whose iframe is at the limit is not read (`limit.exceeded`). Its bytes count against the decode budget (cut with `limit.exceeded`) and its text against the text budget. |
+| `iframe src`, `frame`, `embed`, `object`, `audio`, `video` | the address is not fetched and counts toward `input.external_reference` (a `data:` or `javascript:` address does not); the element's own content, such as an iframe's fallback text, is read where it stands |
 | `<title>` | `Metadata.Title` |
 | `<meta name=author>` | `Metadata.Authors`, one entry each, not split |
 | `<meta name=keywords>` | `Metadata.Keywords`, one entry, not split |
@@ -109,7 +110,7 @@ Everything is extracted; nothing is dropped. Where the page itself declares that
 - inline `visibility: hidden` or `collapse`, inherited, and undone by `visibility: visible` inside;
 - the SVG presentation attribute `display="none"`;
 - the SVG presentation attribute `visibility="hidden"` (or `collapse`), undone by `visible` inside;
-- the content of `template`, which is inert by the element's definition (decided by Andrew, 2026-11-20).
+- the content of `template`, which is inert by the element's definition.
 
 `no_ink` is reported for:
 
@@ -136,8 +137,8 @@ The same rules apply to raw HTML in Markdown and to every EPUB chapter.
 | `input.external_reference` | warning | resources loaded from elsewhere: pictures, scripts, stylesheets, frames, embedded objects, media, a refresh to another address, a form's target; nothing is fetched |
 | `text.unmapped_glyphs` | warning | bytes not valid in the encoding read, shown as U+FFFD |
 | `image.unsupported_encoding` | warning | with `ImagesData`, a `data:` image that could not be decoded |
-| `part.no_text`, `part.image_only` | warning | the body has no text |
-| `limit.exceeded` | error | a limit cut the body off |
+| `part.no_text`, `part.image_only` | warning | the body or an EPUB chapter has no text (`part.no_text` also when an EPUB has no chapters) |
+| `limit.exceeded` | error | a limit cut off the body, an EPUB chapter, the table of contents or the stored part; an EPUB has more chapters than `Limits.MaxParts`; an `iframe srcdoc` document is at the depth limit |
 | `html.charset_unsupported` | warning | a declared encoding that is not decoded, read as windows-1252; or an `Extractor.Charset` label that is not decoded, ignored |
 | `html.nesting_flattened` | warning | elements nested deeper than `Extractor.MaxDepth` (default 512), or more than 4096 open at once; below that their text is read side by side, with their display reasons kept |
 | `html.metadata_truncated` | info | a metadata value over 64 KiB, or more than 256 authors or keyword declarations |
@@ -146,6 +147,10 @@ The same rules apply to raw HTML in Markdown and to every EPUB chapter.
 | `epub.encrypted` | error | resources are encrypted (DRM) and were not read |
 | `epub.mimetype` | info | the `mimetype` member is missing or wrong |
 | `part.failed` | error | EPUB: a chapter could not be read (missing from the manifest or archive, encrypted) |
+| `child.encrypted` | error | EPUB, on a child: an embedded document `META-INF/encryption.xml` lists; it was not opened |
+| `child.not_extracted` | info, warning | EPUB, on a child: not extracted, since `Options.Child` is not set (info), or the depth limit was reached or its bytes could not be read (warning); set by core's `Options.ExtractChild` |
+| `child.unsupported` | warning | EPUB, on a child: `Options.Child` returned `ErrUnsupported` (the command's does for formats other than HTML, Markdown, text and EPUB) |
+| `child.failed` | error | EPUB, on a child: `Options.Child` returned any other error |
 
 ## Limits
 
@@ -160,7 +165,7 @@ Block quotes and lists in Markdown nest at most 100 deep (`md.MaxNest`); a marke
 
 ## Not read
 
-Stylesheets and scripts (not evaluated); `aria-labelledby`/`aria-describedby` references (not resolved); `srcset`; the `title` and `meta` of an `iframe srcdoc` document; CSS generated content; `<base href>` (addresses are as written); layout tables are tables. In Markdown: the GFM extensions other than tables, and front matter, as above.
+Stylesheets and scripts (not evaluated); `aria-labelledby`/`aria-describedby` references (not resolved); `srcset`; the `title` and `meta` of an `iframe srcdoc` document; CSS generated content; `<base href>` (addresses are as written); layout tables are tables. In Markdown: GFM footnotes, extended email autolinks, the disallowed-raw-HTML filter and front matter, as above.
 
 ## Licence
 

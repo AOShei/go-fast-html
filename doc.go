@@ -1,14 +1,18 @@
 // Package gofasthtml extracts HTML, Markdown, plain text and EPUB into the
 // shared go-fast document model, gofastcore.Document. An EPUB is a part
 // for each chapter of its spine, read as XHTML. Markdown is parsed as
-// CommonMark (with GFM tables), rendered to HTML and read as a page is, so
-// its raw HTML gets the same checks; blocks are located in the Markdown.
+// CommonMark with the GFM tables, strikethrough, task lists and extended
+// autolinks, rendered to HTML and read as a page is, so its raw HTML gets
+// the same checks; blocks are located in the Markdown.
 //
 // It uses the standard library and go-fast-core only, with an HTML5
 // tokenizer and tree builder of its own that recover from tag soup the way
-// browsers do. A document is one part of kind body. Blocks carry their
-// byte range in the source (Loc.Offset, Loc.Length) and the id of their
-// element (Loc.Anchor).
+// browsers do. An HTML page, a Markdown document or a plain text file is
+// one part of kind body; an EPUB is one part of kind chapter for each
+// chapter. Script and style text, hidden form values and, in an EPUB,
+// images no chapter shows go to a part of kind stored after them when the
+// whole document is read. Blocks carry their byte range in the source
+// (Loc.Offset, Loc.Length) and the id of their element (Loc.Anchor).
 //
 // Everything is extracted. Where the page declares, in an attribute or in
 // inline style, that text is not displayed or has no ink, the blocks carry
