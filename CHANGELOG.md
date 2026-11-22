@@ -19,8 +19,8 @@ notebook.
   `error`. Of an output's representations the one JupyterLab prefers is
   read: HTML (a DataFrame is its table), Markdown, LaTeX (a `formula`
   block), an image, then plain text. Printed text and tracebacks are read
-  as a terminal shows them: escape sequences left out, carriage returns
-  writing over their line.
+  as JupyterLab shows them: escape sequences left out, backspaces
+  taking out a character, carriage returns writing over their line.
 - **What the notebook declares.** A collapsed input or collapsed outputs
   are `hidden`.
 - **Location and metadata.** A cell's `id` is `Loc.Anchor` of its blocks.

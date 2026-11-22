@@ -3,12 +3,15 @@ package gofasthtml
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
 	"math"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -114,17 +117,25 @@ func (e *Extractor) notebook(ctx context.Context, doc *gofastcore.Document, src 
 	}
 
 	r.pc = pageConfig{opts: opts, text: text, decode: decode, notebook: true,
-		noDataElsewhere: func() int { return r.attachOver }}
+		noDataElsewhere: func() int { return r.attachOver },
+		// An attachment is in the notebook, not loaded from elsewhere.
+		internal: func(ref string) bool { return strings.HasPrefix(ref, "attachment:") }}
 	r.agg = &blocks.Result{}
 	for i, raw := range cells {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		before := len(r.agg.Blocks)
 		if err := r.cell(i, raw); err != nil {
 			return nil, err
 		}
 		if r.agg.Cut || r.decodeCut {
-			r.left = nbCellsLeft(len(cells) - i - 1)
+			left := len(cells) - i - 1
+			if len(r.agg.Blocks) == before {
+				// Nothing of this cell was output: it was not read either.
+				left++
+			}
+			r.left = nbCellsLeft(left)
 			break
 		}
 	}
@@ -333,6 +344,7 @@ type fragment struct {
 	lang   string // Attrs[AttrLanguage] of its code blocks
 	output string // Attrs[AttrOutput]
 	latex  bool   // its code block is a LaTeX formula
+	hidden bool   // the notebook declares it collapsed
 }
 
 // cell reads the i-th cell. A cell that is not a JSON object is counted
@@ -354,7 +366,16 @@ func (r *nbReader) cell(i int, raw json.RawMessage) error {
 			anchor = id
 		}
 	}
-	image := r.attachments(i, r.object(c["attachments"]))
+	var att map[string]map[string]json.RawMessage
+	for name, v := range r.object(c["attachments"]) {
+		if bundle := r.object(v); bundle != nil {
+			if att == nil {
+				att = map[string]map[string]json.RawMessage{}
+			}
+			att[name] = bundle
+		}
+	}
+	image := r.attachments(i, att)
 
 	var frags []fragment
 	kind := r.str(c["cell_type"])
@@ -384,10 +405,8 @@ func (r *nbReader) cell(i int, raw json.RawMessage) error {
 		// text as it is.
 		frags = append(frags, pre(r.multiline(c["source"]), "", ""))
 	}
-	if sourceHidden {
-		for j := range frags {
-			frags[j].html = hide(frags[j].html)
-		}
+	for j := range frags {
+		frags[j].hidden = sourceHidden
 	}
 	if kind == "code" {
 		var outs []json.RawMessage
@@ -398,10 +417,8 @@ func (r *nbReader) cell(i int, raw json.RawMessage) error {
 		if err != nil {
 			return err
 		}
-		if outputsHidden {
-			for j := range of {
-				of[j].html = hide(of[j].html)
-			}
+		for j := range of {
+			of[j].hidden = outputsHidden
 		}
 		frags = append(frags, of...)
 	}
@@ -423,7 +440,11 @@ func (r *nbReader) cell(i int, raw json.RawMessage) error {
 				b.Loc.Anchor = anchor
 			}
 			if b.Kind == gofastcore.KindCode && f.latex {
+				// A formula's text has no space around it, as a code
+				// block's may.
 				b.Kind = gofastcore.KindFormula
+				b.Text = strings.TrimSpace(b.Text)
+				b.Spans = nil
 				delete(b.Attrs, gofastcore.AttrLanguage)
 				setAttr(b, gofastcore.AttrNotation, gofastcore.NotationLaTeX)
 			} else if b.Kind == gofastcore.KindCode && f.lang != "" {
@@ -436,6 +457,14 @@ func (r *nbReader) cell(i int, raw json.RawMessage) error {
 			if f.output != "" {
 				setAttr(b, AttrOutput, f.output)
 			}
+			if f.hidden {
+				hideBlock(b)
+			}
+		}
+		if f.latex {
+			w.res.Blocks = slices.DeleteFunc(w.res.Blocks, func(b gofastcore.Block) bool {
+				return b.Kind == gofastcore.KindFormula && b.Text == ""
+			})
 		}
 		r.merge(w)
 		if w.res.Cut {
@@ -456,13 +485,33 @@ func setAttr(b *gofastcore.Block, k, v string) {
 // nbControl reports a control character, which no anchor has.
 func nbControl(c rune) bool { return c < 0x20 || c == 0x7F || c >= 0x80 && c < 0xA0 }
 
-// hide marks a fragment hidden, as the notebook declares its cell's
-// input or outputs collapsed.
-func hide(h []byte) []byte {
-	out := make([]byte, 0, len(h)+32)
-	out = append(out, "<div hidden>"...)
-	out = append(out, h...)
-	return append(out, "</div>"...)
+// hideBlock marks a whole block hidden, as the notebook declares its
+// cell's input or outputs collapsed. The reason then applies to the whole
+// block, so it is taken off the spans and table regions that had it, and
+// those that are left marking nothing are dropped.
+func hideBlock(b *gofastcore.Block) {
+	b.Display |= gofastcore.DisplayHidden
+	b.Spans = slices.DeleteFunc(b.Spans, func(sp gofastcore.Span) bool {
+		sp.Display &^= gofastcore.DisplayHidden
+		return sp.Display == 0 && sp.Style == 0 && sp.Href == ""
+	})
+	for k := range b.Spans {
+		b.Spans[k].Display &^= gofastcore.DisplayHidden
+	}
+	if b.Table != nil {
+		b.Table.Display = slices.DeleteFunc(b.Table.Display, func(d gofastcore.DisplayCells) bool {
+			return d.Display&^gofastcore.DisplayHidden == 0
+		})
+		for k := range b.Table.Display {
+			b.Table.Display[k].Display &^= gofastcore.DisplayHidden
+		}
+		if len(b.Table.Display) == 0 {
+			b.Table.Display = nil
+		}
+	}
+	if len(b.Spans) == 0 {
+		b.Spans = nil
+	}
 }
 
 // pre is a fragment of verbatim text: a cell's code, the text of an
@@ -487,33 +536,55 @@ func (r *nbReader) markdown(s string) (fragment, error) {
 
 // attachments resolves the images a Markdown cell names as
 // "attachment:name", from the cell's attachments.
-func (r *nbReader) attachments(i int, att map[string]json.RawMessage) func(string) (blocks.ImageRef, bool) {
+func (r *nbReader) attachments(i int, att map[string]map[string]json.RawMessage) func(string) (blocks.ImageRef, bool) {
 	if len(att) == 0 {
 		return nil
 	}
+	type found struct {
+		ref blocks.ImageRef
+		ok  bool
+	}
+	seen := map[string]found{} // each attachment is read once
 	return func(src string) (blocks.ImageRef, bool) {
 		name, ok := strings.CutPrefix(src, "attachment:")
 		if !ok {
 			return blocks.ImageRef{}, false
 		}
-		bundle := r.object(att[name])
-		if bundle == nil {
+		if _, ok := att[name]; !ok {
 			if u, err := url.PathUnescape(name); err == nil {
 				name = u
-				bundle = r.object(att[name])
 			}
 		}
+		if f, ok := seen[name]; ok {
+			return f.ref, f.ok
+		}
+		bundle := att[name]
 		for _, mime := range nbRepresentations {
 			if !strings.HasPrefix(mime, "image/") || bundle[mime] == nil {
 				continue
 			}
 			value := r.multiline(bundle[mime])
-			return blocks.ImageRef{ID: fmt.Sprintf("cell-%d/attachment:%s", i+1, name), MIME: mime, Data: func() ([]byte, bool) {
+			ref := blocks.ImageRef{ID: attachmentID(i, name), MIME: mime, Data: func() ([]byte, bool) {
 				return r.imageBytes(mime, value)
-			}}, true
+			}}
+			seen[name] = found{ref, true}
+			return ref, true
 		}
+		seen[name] = found{}
 		return blocks.ImageRef{}, false
 	}
+}
+
+// attachmentID is the Image.ID of the attachment of the i-th cell with
+// this name: "cell-N/attachment:name", or with a name of control
+// characters or longer than blocks.MaxAnchor, the start of the SHA-256 of
+// the name in its place.
+func attachmentID(i int, name string) string {
+	if len(name) > blocks.MaxAnchor || !utf8.ValidString(name) || strings.ContainsFunc(name, nbControl) {
+		sum := sha256.Sum256([]byte(name))
+		name = "sha256:" + hex.EncodeToString(sum[:16])
+	}
+	return fmt.Sprintf("cell-%d/attachment:%s", i+1, name)
 }
 
 // imageBytes decodes an image of the notebook within the decode budget:
@@ -545,12 +616,14 @@ func (r *nbReader) imageBytes(mime, value string) ([]byte, bool) {
 // stream outputs of one stream are joined, as a notebook shows them.
 func (r *nbReader) outputs(outs []json.RawMessage) ([]fragment, error) {
 	var frags []fragment
-	stream, streamText := "", ""
+	stream := ""
+	var streamText strings.Builder
 	flush := func() {
 		if stream != "" {
-			frags = append(frags, pre(terminal(streamText), "", stream))
+			frags = append(frags, pre(terminal(streamText.String()), "", stream))
 		}
-		stream, streamText = "", ""
+		stream = ""
+		streamText.Reset()
 	}
 	for _, raw := range outs {
 		o := r.object(raw)
@@ -571,7 +644,7 @@ func (r *nbReader) outputs(outs []json.RawMessage) ([]fragment, error) {
 				flush()
 				stream = name
 			}
-			streamText += r.multiline(o["text"])
+			streamText.WriteString(r.multiline(o["text"]))
 			continue
 		}
 		flush()
@@ -671,11 +744,14 @@ func (r *nbReader) merge(w walked) {
 	r.limited = r.limited || w.limited
 }
 
-// terminal reads text written to a terminal as a notebook shows it: the
-// escape sequences that set colours and move the cursor are left out, and
-// text after a carriage return writes over the line from its start.
+// terminal reads text written to a terminal as JupyterLab shows it:
+// escape sequences that set colours and move the cursor are left out (a
+// CSI sequence ends at its final byte, and one with none before the line
+// ends is not a sequence), a backspace takes out the character before it
+// on its line, and text after a carriage return writes over the line
+// from its start. Each step is linear in the text.
 func terminal(s string) string {
-	if !strings.ContainsAny(s, "\x1b\r") {
+	if !strings.ContainsAny(s, "\x1b\r\b") {
 		return s
 	}
 	var b strings.Builder
@@ -687,56 +763,81 @@ func terminal(s string) string {
 			i++
 			continue
 		}
-		i++
-		if i >= len(s) {
+		if i+1 >= len(s) {
 			break
 		}
-		switch s[i] {
+		switch s[i+1] {
 		case '[': // CSI: parameters and intermediates, then a final byte
-			i++
-			for i < len(s) && (s[i] < 0x40 || s[i] > 0x7E) {
-				i++
+			j := i + 2
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7E) && s[j] != '\n' {
+				j++
 			}
-			i++
+			if j < len(s) && s[j] != '\n' {
+				i = j + 1
+			} else {
+				i++ // not a sequence: the escape alone is left out
+			}
 		case ']': // OSC: to BEL or ST
-			i++
-			for i < len(s) {
-				if s[i] == 0x07 {
-					i++
+			j := i + 2
+			for j < len(s) {
+				if s[j] == 0x07 {
+					j++
 					break
 				}
-				if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
-					i += 2
+				if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
+					j += 2
 					break
 				}
-				i++
+				j++
 			}
+			i = j
 		default: // a two-character sequence
-			_, size := utf8.DecodeRuneInString(s[i:])
-			i += size
+			_, size := utf8.DecodeRuneInString(s[i+1:])
+			i += 1 + size
 		}
 	}
 	s = b.String()
+	if strings.Contains(s, "\b") {
+		// Backspaces first, as JupyterLab: each takes out the character
+		// before it, unless that is a line feed.
+		out := make([]byte, 0, len(s))
+		for i := 0; i < len(s); i++ {
+			if s[i] != '\b' {
+				out = append(out, s[i])
+				continue
+			}
+			if n := len(out); n > 0 && out[n-1] != '\n' {
+				_, size := utf8.DecodeLastRune(out)
+				out = out[:n-size]
+			}
+		}
+		s = string(out)
+	}
 	if !strings.Contains(s, "\r") {
 		return s
 	}
 	s = strings.ReplaceAll(s, "\r\n", "\n")
-	lines := strings.Split(s, "\n")
-	for k, line := range lines {
-		if !strings.Contains(line, "\r") {
-			continue
-		}
-		segs := strings.Split(line, "\r")
-		cur := []rune(segs[0])
-		for _, seg := range segs[1:] {
-			over := []rune(seg)
-			if len(over) >= len(cur) {
-				cur = over
+	var out strings.Builder
+	out.Grow(len(s))
+	var line []rune
+	pos := 0
+	for _, c := range s {
+		switch c {
+		case '\n':
+			out.WriteString(string(line))
+			out.WriteByte('\n')
+			line, pos = line[:0], 0
+		case '\r':
+			pos = 0
+		default:
+			if pos < len(line) {
+				line[pos] = c
 			} else {
-				cur = append(over, cur[len(over):]...)
+				line = append(line, c)
 			}
+			pos++
 		}
-		lines[k] = string(cur)
 	}
-	return strings.Join(lines, "\n")
+	out.WriteString(string(line))
+	return out.String()
 }

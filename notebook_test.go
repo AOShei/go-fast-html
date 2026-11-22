@@ -366,3 +366,86 @@ func TestNotebookVersionString(t *testing.T) {
 		t.Errorf("%+v", doc.Metadata)
 	}
 }
+
+// TestNotebookReview covers the findings of the review of the first
+// version.
+func TestNotebookReview(t *testing.T) {
+	// A collapsed output's own </div> does not end the hidden reason.
+	out := codeCell("o", "x", display("display_data", map[string]any{"text/html": "</div><p>secret output</p><p>a <span hidden>b</span></p>"}))
+	out["metadata"] = map[string]any{"jupyter": map[string]any{"outputs_hidden": true}}
+	md := mdCell("m", "</div>\n\nvisible para")
+	md["metadata"] = map[string]any{"jupyter": map[string]any{"source_hidden": true}}
+	doc := nbDoc(t, nb(out, md), &gofastcore.Options{Spans: true})
+	for _, b := range doc.Parts[0].Blocks {
+		if b.Attrs[gofastcore.AttrLanguage] == "" && b.DisplayWhole()&gofastcore.DisplayHidden == 0 {
+			t.Errorf("not hidden: %q %+v", b.Text, b.Spans)
+		}
+	}
+
+	// LaTeX with space around it.
+	doc = nbDoc(t, nb(codeCell("l", "x",
+		display("execute_result", map[string]any{"text/latex": "  $x^2$\n"}),
+		display("execute_result", map[string]any{"text/latex": " \n"}))), nil)
+	sameLines(t, shape(doc), []string{"code(python) x", "formula[execute_result] $x^2$"})
+
+	// An attachment name with a control character; attachments are not
+	// external; one value of the wrong type is counted once.
+	c := mdCell("a", "![y](attachment:a%01b) ![z](attachment:bad.png) ![z](attachment:bad.png)")
+	c["attachments"] = map[string]any{"a\x01b": map[string]any{"image/png": "iVBORw0KGgo="}, "bad.png": "oops"}
+	doc = nbDoc(t, nb(c), &gofastcore.Options{Images: gofastcore.ImagesData})
+	if w := csvWarnings(doc, gofastcore.WarnInputExternalReference); len(w) != 0 {
+		t.Errorf("external: %q", w)
+	}
+	if w := csvWarnings(doc, gofastcore.WarnInputRepaired); len(w) != 1 || !strings.HasPrefix(w[0], "1 value has") {
+		t.Errorf("repaired: %q", w)
+	}
+	if id := doc.Parts[0].Blocks[0].Image.ID; !strings.HasPrefix(id, "cell-1/attachment:sha256:") {
+		t.Errorf("id: %q", id)
+	}
+
+	// The cells not read include the one nothing of which was output.
+	raw := func(s string) map[string]any { return map[string]any{"cell_type": "raw", "source": s} }
+	doc = nbDoc(t, nb(raw("a"), raw(strings.Repeat("y", 5000)), raw("z")), &gofastcore.Options{Limits: gofastcore.Limits{MaxDecodedBytes: 2000}})
+	if w := csvWarnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.HasSuffix(w[0], "(2 cells not read)") {
+		t.Errorf("decode: %q", w)
+	}
+	doc = nbDoc(t, nb(raw("a"), raw(strings.Repeat("b", 3000)), raw("c")), &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 1000}})
+	if w := csvWarnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.HasSuffix(w[0], " cells not read)") {
+		t.Errorf("text: %q", w)
+	}
+
+	// Terminal text as JupyterLab shows it.
+	for in, want := range map[string]string{
+		"\x1b[31\nHello world": "[31\nHello world",
+		"abc\b\bX":             "aX",
+		"a\n\bb":               "a\nb",
+	} {
+		if got := terminal(in); got != want {
+			t.Errorf("terminal(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestNotebookLinear checks that joining many stream outputs and many
+// carriage returns take time linear in the input.
+func TestNotebookLinear(t *testing.T) {
+	n := 80000
+	if testing.Short() || raceSlowdown > 1 {
+		n = 10000
+	}
+	var outs []map[string]any
+	for range n {
+		outs = append(outs, stream("stdout", strings.Repeat("x", 40)+"\n"))
+	}
+	cr := strings.Repeat("x", n) + strings.Repeat("\r", n) + strings.Repeat("y\r", n)
+	for name, src := range map[string]string{
+		"streams":          nb(codeCell("s", "", outs...)),
+		"carriage returns": nb(codeCell("c", "", stream("stdout", cr))),
+	} {
+		start := time.Now()
+		nbDoc(t, src, nil)
+		if d := time.Since(start); d > 2*raceSlowdown*time.Second {
+			t.Errorf("%s: %d bytes took %v", name, len(src), d)
+		}
+	}
+}
