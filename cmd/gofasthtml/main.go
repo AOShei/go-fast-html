@@ -62,6 +62,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		format   = flags.String("format", "json", "what to print: json, markdown or text")
 		as       = flags.String("as", "", "read every input as html, md, txt, epub, csv or tsv (default: by extension, else by content)")
 		delim    = flags.String("delimiter", "", "the delimiter of csv and tsv input: one character, or \\t or tab for tab (default: a sep= first line, else tab for tsv, else sniffed for csv); a sep= first line overrides it")
+		noQuotes = flags.Bool("no-quotes", false, "read csv and tsv input with no quoting: a quote is a character like any other, and fields and rows end only at the delimiter and line ends")
 		header   = flags.Bool("header", false, "the first row of csv and tsv input is a header row, as the MIME parameter header=present declares")
 		cs       = flags.String("charset", "", "the encoding of every input, as a MIME charset label gives it (windows-1251, shift_jis); a byte order mark overrides it")
 		parts    = flags.String("parts", "", "chapters of an EPUB to read, by number: 3, or 2-5")
@@ -146,7 +147,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		opts.Parts = gofastcore.PartRange{First: a, Last: b}
 	}
 	extractor := &gofasthtml.Extractor{Format: *as, MaxDepth: *maxDepth, MaxArchiveMembers: *members, Charset: *cs,
-		Delimiter: delimiter, Header: *header}
+		Delimiter: delimiter, Header: *header, NoQuotes: *noQuotes}
 	// A document an EPUB holds besides its chapters is read too if it is
 	// one of the formats of this library, decided by its name and content.
 	epubs := &gofasthtml.Extractor{MaxDepth: *maxDepth, MaxArchiveMembers: *members}

@@ -58,7 +58,8 @@ func FuzzExtract(f *testing.F) {
 }
 
 // FuzzCSV reads arbitrary input as csv and tsv, with the delimiter
-// sniffed, given and declared, under small limits, and checks the
+// sniffed, given and declared, with quoting and without, under small
+// limits, and checks the
 // document against the contract: among others that every table is a
 // rectangle of at least one row and one column, and that a piece of a
 // split table has the columns of the piece before it.
@@ -84,7 +85,7 @@ func FuzzCSV(f *testing.F) {
 				t.Fatalf("%d bytes took %v", len(b), d)
 			}
 		}()
-		e := &Extractor{Format: "csv", Header: mode&1 != 0}
+		e := &Extractor{Format: "csv", Header: mode&1 != 0, NoQuotes: mode&64 != 0}
 		if mode&2 != 0 {
 			e.Format = "tsv"
 		}

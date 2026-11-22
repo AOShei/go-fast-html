@@ -17,9 +17,20 @@ text (or HTML) by `Detect` is now read as CSV or TSV.
   `Extractor.Delimiter`, tab for `tsv`, or sniffed among `,` `;` tab `|`
   for `csv`; recorded in `Metadata.Extra["delimiter"]` and
   `["delimiter_source"]`.
+  The delimiter is written `U+XXXX` when it is a control character other
+  than tab or a ligature. A first row longer than the 64 KiB sniffing
+  window is skipped so that the rows after it decide.
 - **`Extractor.Header`** declares a header row (MIME `header=present`).
+- **Quoting**: on by default for csv and tsv alike (Excel, pandas,
+  Python's `excel-tab`); the new `Extractor.NoQuotes` (`-no-quotes`)
+  reads quotes as characters, as IANA's `text/tab-separated-values` has
+  it.
+- **Rows with no text** are decided after control characters are
+  dropped: a trailing row of control characters is left out, and a file
+  of them alone has no table and `part.no_text`.
 - **Lenient RFC 4180 reading**, with one `input.repaired` per part giving
-  the number of rows with a quote outside the rules.
+  the number of rows output with a quote outside the rules (rows the
+  text budget refuses are not counted, nor are their cut fields).
 - **Bounds**: fields past column 16,384 (`MaxCSVColumns`) and field text
   past 1 MiB (`MaxCSVField`) give `limit.exceeded` with a count; the text
   budget cutting the sheet gives the number of rows not read.

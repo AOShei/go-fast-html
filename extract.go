@@ -114,6 +114,13 @@ type Extractor struct {
 	// as RFC 4180's MIME parameter header=present declares; its table
 	// then has HeaderRows 1. A header row is never inferred.
 	Header bool
+	// NoQuotes reads csv and tsv input with no quoting: fields are split
+	// at the delimiter and rows at line ends only, and a quote is a
+	// character like any other, as the IANA definition of
+	// text/tab-separated-values has it. By default fields may be quoted
+	// as RFC 4180 has them, in tsv too, as Excel, pandas and Python's
+	// excel-tab dialect write and read them.
+	NoQuotes bool
 }
 
 var _ gofastcore.Extractor = (*Extractor)(nil)

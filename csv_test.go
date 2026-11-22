@@ -329,3 +329,97 @@ func TestCSVWorstCase(t *testing.T) {
 		})
 	}
 }
+
+// TestCSVNoQuotes reads tsv with quoting, the default, and without.
+func TestCSVNoQuotes(t *testing.T) {
+	src := "id\ttitle\n1\t\"Hello\" she said\n2\t\"Unbalanced\n3\tx\n4\ty\n"
+
+	// Quoting on: the unclosed quote runs to the end of the input, so the
+	// rows after it are one field.
+	doc := csvDoc(t, &Extractor{Format: "tsv"}, "", src, nil)
+	want := [][]string{{"id", "title"}, {"1", "Hello she said"}, {"2", "Unbalanced\n3\tx\n4\ty\n"}}
+	if rows := csvRows(t, doc); !reflect.DeepEqual(rows, want) {
+		t.Errorf("quotes: %q", rows)
+	}
+	if w := csvWarnings(doc, gofastcore.WarnInputRepaired); len(w) != 1 || !strings.HasPrefix(w[0], "2 rows have") {
+		t.Errorf("quotes: %q", w)
+	}
+
+	// Quoting off: quotes are text, and every line is a row.
+	for _, format := range []string{"tsv", "csv"} {
+		doc = csvDoc(t, &Extractor{Format: format, NoQuotes: true}, "", src, nil)
+		want = [][]string{{"id", "title"}, {"1", "\"Hello\" she said"}, {"2", "\"Unbalanced"}, {"3", "x"}, {"4", "y"}}
+		if rows := csvRows(t, doc); !reflect.DeepEqual(rows, want) {
+			t.Errorf("%s no quotes: %q", format, rows)
+		}
+		if w := csvWarnings(doc, gofastcore.WarnInputRepaired); len(w) != 0 {
+			t.Errorf("%s no quotes: %q", format, w)
+		}
+	}
+}
+
+// TestCSVSniffLongFirstRow: a first row longer than the sniffing window
+// is skipped, and the rows after it decide.
+func TestCSVSniffLongFirstRow(t *testing.T) {
+	long := strings.Repeat("y", 70000)
+	src := "\"" + long + "\";b;c\n1;2;3\n4;5;6\n"
+	doc := csvDoc(t, &Extractor{Format: "csv"}, "", src, nil)
+	if d := doc.Metadata.Extra["delimiter"]; d != ";" {
+		t.Errorf("delimiter %q", d)
+	}
+	want := [][]string{{long, "b", "c"}, {"1", "2", "3"}, {"4", "5", "6"}}
+	if rows := csvRows(t, doc); !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows: %d", len(rows))
+	}
+}
+
+// TestCSVRefusedRowsUncounted: rows the text budget refuses are not
+// counted in input.repaired.
+func TestCSVRefusedRowsUncounted(t *testing.T) {
+	var b strings.Builder
+	for i := range 5000 {
+		b.WriteString("a\"b," + strconv.Itoa(i) + "\n")
+	}
+	doc := csvDoc(t, &Extractor{Format: "csv"}, "", b.String(), &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 4 << 10}})
+	rows := csvRows(t, doc)
+	if len(rows) == 0 || len(rows) >= 5000 {
+		t.Fatalf("%d rows", len(rows))
+	}
+	w := csvWarnings(doc, gofastcore.WarnInputRepaired)
+	if want := strconv.Itoa(len(rows)) + " rows have "; len(w) != 1 || !strings.HasPrefix(w[0], want) {
+		t.Errorf("%d rows: %q", len(rows), w)
+	}
+}
+
+// TestCSVControlOnly: a field of control characters alone has no text
+// once they are removed.
+func TestCSVControlOnly(t *testing.T) {
+	// A last row of a control character is not a row.
+	doc := csvDoc(t, &Extractor{Format: "csv"}, "", "a,b\n1,2\n\x01\n", nil)
+	if rows := csvRows(t, doc); !reflect.DeepEqual(rows, [][]string{{"a", "b"}, {"1", "2"}}) {
+		t.Errorf("last row: %q", rows)
+	}
+	// A file of control characters only has no text; a C1 control is two
+	// bytes. A tab, kept, is text.
+	for _, c := range []struct {
+		src  string
+		text bool
+	}{
+		{"\x01,\x02\n\x7f\n", false},
+		{"\u0085,\u009f\x1f\n", false},
+		{"\"\x01\t\"\n", true},
+		{"\x01\xc2\xa0\n", true}, // U+00A0
+	} {
+		doc = csvDoc(t, &Extractor{Format: "csv"}, "", c.src, nil)
+		blocks, noText := len(doc.Parts[0].Blocks), len(csvWarnings(doc, gofastcore.WarnPartNoText))
+		if c.text != (blocks == 1) || c.text != (noText == 0) {
+			t.Errorf("%q: %d blocks, %d part.no_text", c.src, blocks, noText)
+		}
+	}
+	// A C1 control split by the first byte of a delimiter of two bytes
+	// (U+00A6 is 0xC2 0xA6) is still no text.
+	doc = csvDoc(t, &Extractor{Format: "csv", Delimiter: 0xA6}, "", "\xc2\x85\xc2\xa6\x01\n", nil)
+	if len(doc.Parts[0].Blocks) != 0 {
+		t.Errorf("two-byte delimiter: %+v", doc.Parts[0].Blocks)
+	}
+}

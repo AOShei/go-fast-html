@@ -85,7 +85,7 @@ func (e *Extractor) csv(ctx context.Context, doc *gofastcore.Document, src []byt
 	} else if format == "tsv" {
 		delim, how = '\t', delimFormat
 	} else {
-		delim, how = sniffDelimiter(body), delimDetected
+		delim, how = sniffDelimiter(body, e.NoQuotes), delimDetected
 	}
 	shown := string(delim)
 	if delim != '\t' && unicode.IsControl(delim) {
@@ -97,7 +97,7 @@ func (e *Extractor) csv(ctx context.Context, doc *gofastcore.Document, src []byt
 	}
 	doc.Metadata.Extra = map[string]string{"delimiter": shown, "delimiter_source": how}
 
-	res, err := readCSV(ctx, body, delim, e.Header, text, &part)
+	res, err := readCSV(ctx, body, delim, e.Header, e.NoQuotes, text, &part)
 	if err != nil {
 		return nil, err
 	}
@@ -168,15 +168,26 @@ func sepLine(b []byte) (rune, []byte, bool) {
 
 // sniffDelimiter picks the delimiter of a csv file among csvDelimiters:
 // the one that splits the most of its first rows into the same number of
-// fields, more than one. With none, it is the comma.
-func sniffDelimiter(b []byte) rune {
-	window := b[:min(len(b), csvSniffBytes)]
+// fields, more than one. With none, it is the comma. A first row longer
+// than the window is skipped, so that the rows after it decide.
+func sniffDelimiter(b []byte, noQuotes bool) rune {
 	best, bestRows := ',', 0
 	for _, d := range csvDelimiters {
-		r := csvReader{src: window, delim: []byte(string(d))}
+		delim := []byte(string(d))
+		from := 0
+		if len(b) > csvSniffBytes {
+			// Where the first row ends depends on the delimiter, which
+			// decides where a quoted field may begin.
+			first := csvReader{src: b, delim: delim, noQuotes: noQuotes}
+			if first.next() && first.pos >= csvSniffBytes {
+				from = first.pos
+			}
+		}
+		window := b[from:min(len(b), from+csvSniffBytes)]
+		r := csvReader{src: window, delim: delim, noQuotes: noQuotes}
 		counts := map[int]int{}
 		for i := 0; i < csvSniffRows && r.next(); i++ {
-			if r.pos >= len(window) && len(window) < len(b) {
+			if r.pos >= len(window) && from+len(window) < len(b) {
 				break // the window cut this row off
 			}
 			if r.fields > 1 {
@@ -209,13 +220,13 @@ type csvResult struct {
 // keeping anything, so that every piece of a split table has the same
 // columns; then to build the tables. What it holds besides the output is
 // one row.
-func readCSV(ctx context.Context, text []byte, delim rune, header bool, budget *gofastcore.TextBudget, part *gofastcore.Part) (csvResult, error) {
+func readCSV(ctx context.Context, text []byte, delim rune, header, noQuotes bool, budget *gofastcore.TextBudget, part *gofastcore.Part) (csvResult, error) {
 	var res csvResult
 	d := []byte(string(delim))
 
 	// The rows to read end at the last row with text; the width is the
 	// widest of them.
-	r := csvReader{src: text, delim: d}
+	r := csvReader{src: text, delim: d, noQuotes: noQuotes}
 	rows, w, width := 0, 0, 0
 	for i := 0; r.next(); i++ {
 		if i&1023 == 0 {
@@ -248,7 +259,7 @@ func readCSV(ctx context.Context, text []byte, delim rune, header bool, budget *
 		}
 		table = nil
 	}
-	r = csvReader{src: text, delim: d, keep: true}
+	r = csvReader{src: text, delim: d, noQuotes: noQuotes, keep: true}
 	var clean []byte
 	var ends []int
 	for i := 0; i < rows && r.next(); i++ {
@@ -257,12 +268,6 @@ func readCSV(ctx context.Context, text []byte, delim rune, header bool, budget *
 				return res, err
 			}
 		}
-		if r.repaired {
-			res.repaired++
-		}
-		res.colsCut += r.colsCut
-		res.fieldsCut += r.fieldsCut
-		res.bytesCut += r.bytesCut
 		if table == nil {
 			if !budget.Take(gofastcore.BlockCost) {
 				res.budget, res.rowsLeft = true, rows-i
@@ -282,6 +287,13 @@ func readCSV(ctx context.Context, text []byte, delim rune, header bool, budget *
 			res.budget, res.rowsLeft = true, rows-i
 			break
 		}
+		// Only a row that is output is counted.
+		if r.repaired {
+			res.repaired++
+		}
+		res.colsCut += r.colsCut
+		res.fieldsCut += r.fieldsCut
+		res.bytesCut += r.bytesCut
 		s := string(clean)
 		cells := make([]string, width)
 		prev = 0
@@ -366,21 +378,26 @@ type csvReader struct {
 	// keep collects the fields' bytes in buf; without it only the fields
 	// are counted.
 	keep bool
+	// noQuotes reads quotes as text: fields end only at the delimiter and
+	// records at line ends.
+	noQuotes bool
 
 	// The last record read.
 	buf       []byte // its fields, up to MaxCSVColumns, each held to MaxCSVField
 	ends      []int  // where each field kept ends in buf
 	fields    int    // the number of fields, also those past MaxCSVColumns; 0 for an empty line
-	text      bool   // a field has text
+	text      bool   // a field kept has a character cleanAppend keeps
 	repaired  bool   // a quote is outside the rules
 	colsCut   int    // fields past MaxCSVColumns
 	fieldsCut int    // fields cut at MaxCSVField
 	bytesCut  int64  // the bytes those lost
 
 	// The field being read.
+	inCols    bool // it is within MaxCSVColumns
 	keepField bool
-	start     int // where it begins in buf
-	raw       int // its length in full
+	start     int  // where it begins in buf
+	raw       int  // its length in full
+	c2        bool // the last byte of it added was 0xC2
 }
 
 // add adds b to the field being read.
@@ -388,12 +405,40 @@ func (r *csvReader) add(b []byte) {
 	if len(b) == 0 {
 		return
 	}
-	if r.keepField {
-		if room := MaxCSVField - (r.raw); room > 0 {
-			r.buf = append(r.buf, b[:min(len(b), room)]...)
+	if room := MaxCSVField - r.raw; room > 0 && r.inCols {
+		kept := b[:min(len(b), room)]
+		if r.keepField {
+			r.buf = append(r.buf, kept...)
+		}
+		if !r.text {
+			r.findText(kept)
 		}
 	}
 	r.raw += len(b)
+}
+
+// findText sets text if b, added to the field, has a character that
+// cleanAppend keeps: anything but a control character other than tab and
+// line feed. A C1 control is two bytes, which may come in two calls.
+func (r *csvReader) findText(b []byte) {
+	for _, c := range b {
+		if r.c2 {
+			r.c2 = false
+			if c >= 0x80 && c <= 0x9F {
+				continue
+			}
+			r.text = true
+			return
+		}
+		switch {
+		case c == 0xC2:
+			r.c2 = true
+		case c < 0x20 && c != '\t' && c != '\n', c == 0x7F:
+		default:
+			r.text = true
+			return
+		}
+	}
 }
 
 // next reads the next record, and reports whether there was one.
@@ -421,16 +466,21 @@ func (r *csvReader) next() bool {
 		return true
 	}
 	d0 := d[0]
+	quote := byte('"')
+	if r.noQuotes {
+		quote = '\n' // already a byte the fields stop at
+	}
 	for {
 		col := r.fields
 		r.fields++
-		r.keepField = r.keep && col < MaxCSVColumns
+		r.inCols = col < MaxCSVColumns
+		r.keepField = r.keep && r.inCols
 		if col >= MaxCSVColumns {
 			r.colsCut++
 		}
-		r.start, r.raw = len(r.buf), 0
+		r.start, r.raw, r.c2 = len(r.buf), 0, false
 		after := false // the field was quoted and the quote closed
-		if pos < len(src) && src[pos] == '"' {
+		if pos < len(src) && src[pos] == quote {
 			pos++
 			closed := false
 			for pos < len(src) && !closed {
@@ -464,7 +514,7 @@ func (r *csvReader) next() bool {
 		delimited := false
 		for pos < len(src) {
 			i := pos
-			for i < len(src) && src[i] != d0 && src[i] != '\n' && src[i] != '\r' && src[i] != '"' {
+			for i < len(src) && src[i] != d0 && src[i] != '\n' && src[i] != '\r' && src[i] != quote {
 				i++
 			}
 			if i > pos {
@@ -492,7 +542,7 @@ func (r *csvReader) next() bool {
 			}
 			// A quote inside the field, or the first byte of a delimiter
 			// of more than one byte that is not the delimiter.
-			if c == '"' || after {
+			if c == quote || after {
 				r.repaired = true
 			}
 			r.add(src[pos : pos+1])
@@ -509,9 +559,6 @@ func (r *csvReader) next() bool {
 
 // endField finishes the field being read.
 func (r *csvReader) endField() {
-	if r.raw > 0 {
-		r.text = true
-	}
 	if !r.keepField {
 		return
 	}
