@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+Jupyter notebooks. Output for the other formats is unchanged; a file
+named `.ipynb`, which `Detect` read as plain text, is now read as a
+notebook.
+
+- **New format `ipynb`** (`application/x-ipynb+json`), detected by the
+  name only, never by content: notebook format versions 4 (4.0 to 4.5)
+  and 3. One part of kind `body`, the cells in order, each read on its
+  own. Versions 1 and 2 give `ErrUnsupported`; input that is not a JSON
+  object with cells, `ErrMalformed`.
+- **Cells.** Markdown cells are read as Markdown, with their attached
+  images (`attachment:name`). Code cells are a `code` block with the
+  notebook's language. Raw cells are a `code` block with no language.
+- **Outputs** follow their cell, each block with `Attrs["output"]`
+  (`AttrOutput`): `stdout`, `stderr`, `execute_result`, `display_data` or
+  `error`. Of an output's representations the one JupyterLab prefers is
+  read: HTML (a DataFrame is its table), Markdown, LaTeX (a `formula`
+  block), an image, then plain text. Printed text and tracebacks are read
+  as a terminal shows them: escape sequences left out, carriage returns
+  writing over their line.
+- **What the notebook declares.** A collapsed input or collapsed outputs
+  are `hidden`.
+- **Location and metadata.** A cell's `id` is `Loc.Anchor` of its blocks.
+  The title, authors, kernel, language and its version, and the format
+  version go to `Metadata`.
+- **Bounds.** Where the text or decode budget runs out the body is cut
+  off, with the number of cells not read; a value of the wrong JSON type
+  is left out, with one `input.repaired` and the count.
+- **Command.** `-as ipynb`; a directory includes `.ipynb` files.
+- `FuzzNotebook`, in CI's fuzz smoke step.
+- **Internal.** Reading an HTML page into blocks and reporting what the
+  walk found are now two steps (`walk`, `report`), so that a notebook's
+  cells can be walked one by one and reported once; the output of every
+  other format is byte-identical over the corpus.
+
 ## v0.2.0 (2026-11-22)
 
 Comma- and tab-separated values. Output for the other formats is

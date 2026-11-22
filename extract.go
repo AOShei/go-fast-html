@@ -81,12 +81,12 @@ const (
 	WarnMetadataTruncated = "html.metadata_truncated"
 )
 
-// Extractor extracts HTML, Markdown, plain text, EPUB, and comma- and
-// tab-separated values. The zero value is ready to use and safe for
-// concurrent use.
+// Extractor extracts HTML, Markdown, plain text, EPUB, comma- and
+// tab-separated values, and Jupyter notebooks. The zero value is ready
+// to use and safe for concurrent use.
 type Extractor struct {
 	// Format is the format to read the input as: "html", "md", "txt",
-	// "epub", "csv" or "tsv". Empty means to decide it with Detect.
+	// "epub", "csv", "tsv" or "ipynb". Empty means to decide it with Detect.
 	Format string
 	// MaxDepth bounds how deeply elements nest in the tree that is read.
 	// Zero means DefaultMaxDepth.
@@ -126,22 +126,26 @@ type Extractor struct {
 var _ gofastcore.Extractor = (*Extractor)(nil)
 
 var mimeTypes = map[string]string{"html": "text/html", "md": "text/markdown", "txt": "text/plain", "epub": "application/epub+zip",
-	"csv": "text/csv", "tsv": "text/tab-separated-values"}
+	"csv": "text/csv", "tsv": "text/tab-separated-values", "ipynb": "application/x-ipynb+json"}
 
 // Formats lists the formats this library extracts.
-func (e *Extractor) Formats() []string { return []string{"html", "md", "txt", "epub", "csv", "tsv"} }
+func (e *Extractor) Formats() []string {
+	return []string{"html", "md", "txt", "epub", "csv", "tsv", "ipynb"}
+}
 
 // Detect decides the format of an input from its name, and failing that
 // from its content: a name ending in .html, .htm, .xhtml or .shtml is
 // HTML; .md, .markdown, .mdown, .mkd, .mkdn or .mdwn Markdown; .txt or
 // .text plain text; .epub EPUB; .csv comma-separated values; .tsv or
-// .tab tab-separated values. A zip archive whose first member is
-// "mimetype" saying application/epub+zip is EPUB whatever its name.
+// .tab tab-separated values; .ipynb a Jupyter notebook. A zip archive
+// whose first member is "mimetype" saying application/epub+zip is EPUB
+// whatever its name.
 // Without one of those, an input that begins with
 // markup, or has a tag of a common HTML element in its first 4 KiB, is
-// HTML, and any other plain text: Markdown and CSV are not guessed from
-// content, since reading plain text as either would take characters out
-// of it or split it where its author did not.
+// HTML, and any other plain text: Markdown, CSV and notebooks are not
+// guessed from content, since reading plain text as Markdown or CSV would
+// take characters out of it or split it where its author did not, and
+// JSON is a notebook only by its name.
 func Detect(name string, src []byte) string {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".csv":
@@ -156,6 +160,8 @@ func Detect(name string, src []byte) string {
 		return "txt"
 	case ".epub":
 		return "epub"
+	case ".ipynb":
+		return "ipynb"
 	}
 	if bytes.HasPrefix(src, []byte("PK\x03\x04")) && len(src) >= 58 && string(src[30:58]) == "mimetypeapplication/epub+zip" {
 		return "epub"
@@ -233,12 +239,14 @@ func (e *Extractor) ExtractFile(ctx context.Context, path string, opts *gofastco
 	return e.Extract(ctx, f, st.Size(), &o)
 }
 
-// Extract reads size bytes of HTML, Markdown, plain text or EPUB from r,
+// Extract reads size bytes of HTML, Markdown, plain text, EPUB, csv, tsv
+// or a Jupyter notebook from r,
 // in the format e.Format names or Detect decides from Options.Name and the
 // content, and returns the document. HTML, Markdown and plain text are one
 // part of kind body; an EPUB is a part of kind chapter for each chapter
 // of its spine; csv and tsv are one part of kind sheet, named by the
-// file, whose rows are table blocks. With the whole document (Options.Parts unset), script and
+// file, whose rows are table blocks; a notebook is one part of kind body.
+// With the whole document (Options.Parts unset), script and
 // style text, hidden form values and an EPUB's images no chapter shows
 // follow in a part of kind stored.
 //
@@ -247,11 +255,13 @@ func (e *Extractor) ExtractFile(ctx context.Context, path string, opts *gofastco
 // members than MaxArchiveMembers, its container.xml or package document
 // is larger than 16 MiB or the decode budget, or its encryption.xml is
 // too large to be read in full; ErrNoPartsSelected when Options.Parts
-// selects no part (part 1 of HTML, Markdown or plain text, a chapter of
-// an EPUB); ErrMalformed when r cannot be read, or an EPUB's archive,
-// package document or encryption.xml cannot be read; ErrUnsupported for a
-// Format this library does not have, or an EPUB whose selected chapters
-// are all encrypted. An EPUB whose encryption.xml cannot be read in full
+// selects no part (part 1 of HTML, Markdown, plain text, csv, tsv or a
+// notebook, a chapter of an EPUB); ErrMalformed when r cannot be read, an
+// EPUB's archive, package document or encryption.xml cannot be read, or a
+// notebook is not a JSON object with cells; ErrUnsupported for a Format
+// this library does not have, an EPUB whose selected chapters are all
+// encrypted, or a notebook of format version 1 or 2. An EPUB whose
+// encryption.xml cannot be read in full
 // has no chapter read, since any may be encrypted. Any input that can be
 // read is a document of its format: tag soup is recovered from the way
 // browsers recover from it.
@@ -303,6 +313,9 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	}
 	if format == "csv" || format == "tsv" {
 		return e.csv(ctx, doc, src, format, opts, text, decode)
+	}
+	if format == "ipynb" {
+		return e.notebook(ctx, doc, src, opts, text, decode)
 	}
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}
@@ -419,6 +432,8 @@ type pageConfig struct {
 	charset string
 	// chapter: the page is a chapter of an EPUB.
 	chapter bool
+	// notebook: the pages are the cells of a notebook.
+	notebook bool
 	// noDataElsewhere counts the images whose data image reported
 	// missing for a reason warned of elsewhere (a limit, encryption),
 	// which image.unsupported_encoding leaves out.
@@ -430,7 +445,7 @@ type pageConfig struct {
 // concerns the whole document goes to t. It returns the result of the
 // walk, nil for plain text.
 func (e *Extractor) page(ctx context.Context, src []byte, format string, pc pageConfig, part *gofastcore.Part, t *tally) (*blocks.Result, error) {
-	opts, text, decode := pc.opts, pc.text, pc.decode
+	text, decode := pc.text, pc.decode
 	enc := charset.SniffText(src, pc.charset)
 	if format == "html" {
 		enc = charset.Sniff(src, pc.charset)
@@ -494,26 +509,60 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		source = func(i int) int64 { return m.Source(h.Source(i)) }
 	}
 
-	tree, err := dom.Parse(ctx, page, dom.Options{MaxDepth: e.MaxDepth, XHTML: pc.xhtml})
+	w, err := e.walk(ctx, page, source, pc)
 	if err != nil {
 		return nil, err
 	}
-	if tree.Limited {
-		part.Warn(gofastcore.SeverityWarning, WarnNestingFlattened,
-			"elements are nested deeper than the limit; below it they were read side by side")
+	part.Blocks = w.res.Blocks
+	e.report(part, w, cut, pc, t)
+	return w.res, nil
+}
+
+// walked is what reading an HTML page into blocks found: the result of
+// the walk, the bounds of the tree builder reached, and whether elements
+// were nested deeper than the limit.
+type walked struct {
+	res     *blocks.Result
+	caps    dom.Caps
+	limited bool
+	// left ends the warning that the text budget cut the part off, as
+	// with the number of a notebook's cells not read.
+	left string
+}
+
+// walk reads an HTML page, or the HTML a Markdown text became, into
+// blocks. source maps its offsets to the input's; nil gives none.
+func (e *Extractor) walk(ctx context.Context, page []byte, source func(int) int64, pc pageConfig) (walked, error) {
+	opts := pc.opts
+	tree, err := dom.Parse(ctx, page, dom.Options{MaxDepth: e.MaxDepth, XHTML: pc.xhtml})
+	if err != nil {
+		return walked{}, err
 	}
 	res, err := blocks.Walk(ctx, tree.Root, blocks.Config{
-		Spans: opts.Spans, Images: opts.Images, Budget: text, Decode: decode, Source: source, Image: pc.image, Internal: pc.internal,
+		Spans: opts.Spans, Images: opts.Images, Budget: pc.text, Decode: pc.decode, Source: source, Image: pc.image, Internal: pc.internal,
 		MaxDepth: e.MaxDepth,
 	})
 	if err != nil {
-		return nil, err
+		return walked{}, err
+	}
+	return walked{res: res, caps: tree.Caps, limited: tree.Limited}, nil
+}
+
+// report adds to part, whose blocks are set, the warnings of what the
+// walks of its pages found, and calls Finish on it. cut says that the
+// input was cut off before the walk, which was warned of. What concerns
+// the whole document goes to t.
+func (e *Extractor) report(part *gofastcore.Part, w walked, cut bool, pc pageConfig, t *tally) {
+	opts, res := pc.opts, w.res
+	if w.limited {
+		part.Warn(gofastcore.SeverityWarning, WarnNestingFlattened,
+			"elements are nested deeper than the limit; below it they were read side by side")
 	}
 	if res.FrameDepth {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			"an iframe srcdoc document is nested at the depth limit and was not read")
 	}
-	if res.FrameFlattened && !tree.Limited {
+	if res.FrameFlattened && !w.limited {
 		part.Warn(gofastcore.SeverityWarning, WarnNestingFlattened,
 			"elements are nested deeper than the limit; below it they were read side by side")
 	}
@@ -522,19 +571,19 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			"the limit on decoded bytes was reached in an iframe srcdoc document; the rest of it was not read")
 	}
-	caps := tree.Caps
+	caps := w.caps
 	caps.Add(res.FrameCaps)
 	builderCaps(part, caps)
-	part.Blocks = res.Blocks
 	if res.Cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-			textCutMessage(part.Kind))
+			textCutMessage(part.Kind)+w.left)
 	}
 	t.active += res.Active
 	t.external += res.External
-	if !pc.chapter {
+	if !pc.chapter && !pc.notebook {
 		// An EPUB chapter's metadata is not the document's: only its
-		// title is used, as the chapter's name.
+		// title is used, as the chapter's name. A notebook's is in its
+		// JSON, not in the HTML of its cells.
 		t.meta.add(res)
 	}
 	if res.AnchorsLeftOut > 0 {
@@ -578,7 +627,6 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		}
 	}
 	part.Finish()
-	return res, nil
 }
 
 // textCutMessage is the message of the warning that the text budget cut

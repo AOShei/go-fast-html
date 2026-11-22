@@ -3,6 +3,7 @@ package gofasthtml
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -119,6 +120,51 @@ func FuzzCSV(f *testing.F) {
 					t.Fatalf("block %d: a row of %d cells in a table of %d columns", i, len(row), width)
 				}
 			}
+		}
+	})
+}
+
+// FuzzNotebook reads arbitrary input as a Jupyter notebook, under small
+// limits and without, and checks the document against the contract.
+//
+//	go test -run XXX -fuzz FuzzNotebook -fuzztime 30s -fuzzminimizetime 0s
+func FuzzNotebook(f *testing.F) {
+	for _, s := range []string{
+		`{"nbformat":4,"nbformat_minor":5,"metadata":{"kernelspec":{"name":"python3"},"authors":[{"name":"a"},"b"]},"cells":[` +
+			`{"cell_type":"markdown","id":"m","source":["# T\n","![x](attachment:a.png)"],"attachments":{"a.png":{"image/png":"iVBORw0K"}},"metadata":{"jupyter":{"source_hidden":true}}},` +
+			`{"cell_type":"code","source":"x","metadata":{"collapsed":true},"outputs":[{"output_type":"stream","name":"stdout","text":["a\r","b\u001b[31m"]},` +
+			`{"output_type":"execute_result","data":{"text/html":"<table><tr><td>1","text/plain":"1"}},` +
+			`{"output_type":"display_data","data":{"image/svg+xml":"<svg/>","text/latex":"$x$"}},` +
+			`{"output_type":"error","ename":"E","evalue":"v","traceback":["\u001b[0;31mE"]}]},` +
+			`{"cell_type":"raw","source":"r"}]}`,
+		`{"nbformat":3,"worksheets":[{"cells":[{"cell_type":"heading","level":9,"source":"h"},` +
+			`{"cell_type":"code","input":"i","language":"r","outputs":[{"output_type":"pyout","html":"<b>x</b>","png":"AAAA"},{"output_type":"pyerr"}]}]}]}`,
+		`{"cells":[1,"x",null,{"cell_type":7,"source":{}}],"metadata":[]}`,
+		`{"nbformat":2}`,
+		`[`,
+	} {
+		f.Add([]byte(s), false)
+	}
+	f.Fuzz(func(t *testing.T, b []byte, small bool) {
+		start := time.Now()
+		defer func() {
+			if d := time.Since(start); d > time.Second {
+				t.Fatalf("%d bytes took %v", len(b), d)
+			}
+		}()
+		opts := &gofastcore.Options{Images: gofastcore.ImagesData, Spans: true}
+		if small {
+			opts.Limits = gofastcore.Limits{MaxTextBytes: 2048, MaxDecodedBytes: 4096}
+		}
+		doc, err := (&Extractor{Format: "ipynb"}).Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+		if err != nil {
+			if !errors.Is(err, gofastcore.ErrMalformed) && !errors.Is(err, gofastcore.ErrUnsupported) {
+				t.Fatal(err)
+			}
+			return
+		}
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("Validate: %v", err)
 		}
 	})
 }
