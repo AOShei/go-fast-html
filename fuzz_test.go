@@ -56,3 +56,68 @@ func FuzzExtract(f *testing.F) {
 		}
 	})
 }
+
+// FuzzCSV reads arbitrary input as csv and tsv, with the delimiter
+// sniffed, given and declared, under small limits, and checks the
+// document against the contract: among others that every table is a
+// rectangle of at least one row and one column, and that a piece of a
+// split table has the columns of the piece before it.
+//
+//	go test -run XXX -fuzz FuzzCSV -fuzztime 30s -fuzzminimizetime 0s
+func FuzzCSV(f *testing.F) {
+	for _, s := range []string{
+		"a,b,c\n1,\"2,3\",4\r\n\"x\"\"y\",\"line\nbreak\"\n",
+		"sep=;\na;b\n\"unclosed;c\n",
+		"Name;Price\nTea;1,50\n\n\n",
+		"a\tb\n\"q\"x\tz\"\n\r\r",
+		"\xEF\xBB\xBFa|b\n\x00\x1b\xC2\x85|\xEF\xAC\x81\n",
+		"\xFF\xFEa\x00,\x00b\x00\n\x00",
+		"caf\xE9,\x80\n",
+		",,,,\n,\n",
+	} {
+		f.Add([]byte(s), byte(0))
+	}
+	f.Fuzz(func(t *testing.T, b []byte, mode byte) {
+		start := time.Now()
+		defer func() {
+			if d := time.Since(start); d > time.Second {
+				t.Fatalf("%d bytes took %v", len(b), d)
+			}
+		}()
+		e := &Extractor{Format: "csv", Header: mode&1 != 0}
+		if mode&2 != 0 {
+			e.Format = "tsv"
+		}
+		if mode&4 != 0 {
+			e.Delimiter = []rune{';', '|', ' ', '§'}[mode>>3&3]
+		}
+		opts := &gofastcore.Options{}
+		if mode&32 != 0 {
+			opts.Limits = gofastcore.Limits{MaxTextBytes: 2048, MaxDecodedBytes: 4096}
+		}
+		doc, err := e.Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+		if len(doc.Parts) != 1 {
+			t.Fatalf("%d parts", len(doc.Parts))
+		}
+		width := 0
+		for i, bl := range doc.Parts[0].Blocks {
+			if bl.Kind != gofastcore.KindTable || bl.Continued != (i > 0) {
+				t.Fatalf("block %d: %v, continued %v", i, bl.Kind, bl.Continued)
+			}
+			for _, row := range bl.Table.Rows {
+				if i == 0 && width == 0 {
+					width = len(row)
+				}
+				if len(row) != width {
+					t.Fatalf("block %d: a row of %d cells in a table of %d columns", i, len(row), width)
+				}
+			}
+		}
+	})
+}

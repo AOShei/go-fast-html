@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
@@ -86,7 +87,15 @@ func (e *Extractor) csv(ctx context.Context, doc *gofastcore.Document, src []byt
 	} else {
 		delim, how = sniffDelimiter(body), delimDetected
 	}
-	doc.Metadata.Extra = map[string]string{"delimiter": string(delim), "delimiter_source": how}
+	shown := string(delim)
+	if delim != '\t' && unicode.IsControl(delim) {
+		// No string has a control character but tab and line feed: one
+		// such as U+001F, the unit separator, is named instead.
+		shown = fmt.Sprintf("U+%04X", delim)
+	} else if l := gofastcore.Ligature(delim); l != "" {
+		shown = fmt.Sprintf("U+%04X", delim)
+	}
+	doc.Metadata.Extra = map[string]string{"delimiter": shown, "delimiter_source": how}
 
 	res, err := readCSV(ctx, body, delim, e.Header, text, &part)
 	if err != nil {

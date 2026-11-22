@@ -88,6 +88,40 @@ func TestCommandEPUB(t *testing.T) {
 	}
 }
 
+func TestCommandCSV(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"a.csv": "x;y\n1;2\n", "b.tsv": "p\tq\n", "c.tab": "r\ts\n", "d.dat": "u,v\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, errs, code := cli(t, "", "-format", "markdown", dir)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	for _, want := range []string{"| x | y |", "| p | q |", "| r | s |"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "| u |") || strings.Contains(out, "u,v") {
+		t.Errorf("d.dat was read:\n%s", out)
+	}
+	out, errs, code = cli(t, "a;b,c\n", "-as", "csv", "-delimiter", ",", "-header", "-")
+	var doc gofastcore.Document
+	if code != 0 || json.Unmarshal([]byte(out), &doc) != nil || doc.Validate() != nil {
+		t.Fatalf("exit %d: %s %s", code, errs, out)
+	}
+	if tb := doc.Parts[0].Blocks[0].Table; tb.HeaderRows != 1 || len(tb.Rows[0]) != 2 || tb.Rows[0][0] != "a;b" || doc.Metadata.Extra["delimiter_source"] != "option" {
+		t.Errorf("document %s", out)
+	}
+	for _, bad := range []string{`"`, "ab", "\n"} {
+		if _, _, code := cli(t, "", "-delimiter", bad, "-"); code != 2 {
+			t.Errorf("-delimiter %q: exit %d", bad, code)
+		}
+	}
+}
+
 func TestCommand(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{

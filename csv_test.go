@@ -103,6 +103,7 @@ func TestCSVDelimiter(t *testing.T) {
 		{"sep crlf", "tsv", 0, "SEP=|\r\na|b\r\n", [][]string{{"a", "b"}}, "|", "declared"},
 		{"sep alone", "csv", 0, "sep=;", nil, ";", "declared"},
 		{"sep multibyte", "csv", 0, "sep=§\na§b\n", [][]string{{"a", "b"}}, "§", "declared"},
+		{"sep control", "csv", 0, "sep=\x1f\na\x1fb\n", [][]string{{"a", "b"}}, "U+001F", "declared"},
 		{"not sep", "csv", 0, "sep=;;\n", [][]string{{"sep=", "", ""}}, ";", "detected"},
 		{"sep quote", "csv", 0, "sep=\"\n", [][]string{{"sep=\""}}, ",", "detected"},
 	} {
