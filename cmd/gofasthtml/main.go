@@ -5,7 +5,7 @@
 //	gofasthtml [flags] file-or-directory...
 //
 // The format of each input is decided by its extension (.html, .htm,
-// .md, .markdown, .txt, .epub, .csv, .tsv, .ipynb, ...) and, failing
+// .md, .markdown, .txt, .epub, .csv, .tsv, .ipynb, .json, .yaml, ...) and, failing
 // that, by its content: an EPUB's mimetype member, or markup; -as sets it. A directory
 // stands for the HTML, Markdown, text, EPUB, CSV, TSV and notebook files
 // in it and
@@ -52,6 +52,7 @@ var extensions = map[string]bool{
 	".txt": true, ".text": true,
 	".epub": true,
 	".csv":  true, ".tsv": true, ".tab": true, ".ipynb": true,
+	".json": true, ".jsonl": true, ".ndjson": true, ".geojson": true, ".yaml": true, ".yml": true,
 }
 
 // run is the command: it reads args and writes documents to stdout and
@@ -61,7 +62,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	flags.SetOutput(stderr)
 	var (
 		format   = flags.String("format", "json", "what to print: json, markdown or text")
-		as       = flags.String("as", "", "read every input as html, md, txt, epub, csv, tsv or ipynb (default: by extension, else by content)")
+		as       = flags.String("as", "", "read every input as html, md, txt, epub, csv, tsv, ipynb, json or yaml (default: by extension, else by content)")
 		delim    = flags.String("delimiter", "", "the delimiter of csv and tsv input: one character, or \\t or tab for tab (default: a sep= first line, else tab for tsv, else sniffed for csv); a sep= first line overrides it")
 		noQuotes = flags.Bool("no-quotes", false, "read csv and tsv input with no quoting: a quote is a character like any other, and fields and rows end only at the delimiter and line ends")
 		header   = flags.Bool("header", false, "the first row of csv and tsv input is a header row, as the MIME parameter header=present declares")
@@ -107,9 +108,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return fail("unknown format %q: json, markdown or text", *format)
 	}
 	switch *as {
-	case "", "html", "md", "txt", "epub", "csv", "tsv", "ipynb":
+	case "", "html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml":
 	default:
-		return fail("unknown value %q for -as: html, md, txt, epub, csv, tsv or ipynb", *as)
+		return fail("unknown value %q for -as: html, md, txt, epub, csv, tsv, ipynb, json or yaml", *as)
 	}
 	var delimiter rune
 	switch *delim {

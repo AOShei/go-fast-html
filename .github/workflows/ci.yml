@@ -59,6 +59,7 @@ jobs:
           go test -run '^$' -fuzz '^FuzzExtract$' -fuzztime 20s -fuzzminimizetime 0s .
           go test -run '^$' -fuzz '^FuzzCSV$' -fuzztime 20s -fuzzminimizetime 0s .
           go test -run '^$' -fuzz '^FuzzNotebook$' -fuzztime 20s -fuzzminimizetime 0s .
+          go test -run '^$' -fuzz '^FuzzData$' -fuzztime 20s -fuzzminimizetime 0s .
           go test -run '^$' -fuzz '^FuzzCharset$' -fuzztime 20s -fuzzminimizetime 0s ./internal/charset
           go test -run '^$' -fuzz '^FuzzDoubleByte$' -fuzztime 20s -fuzzminimizetime 0s ./internal/charset
           go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 20s -fuzzminimizetime 0s ./internal/css

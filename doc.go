@@ -4,7 +4,8 @@
 // of its spine, read as XHTML. A CSV or TSV file is one part of kind sheet
 // whose rows are table blocks. A notebook is one part of kind body: its
 // Markdown cells read as Markdown is, its code cells as code blocks
-// followed by the blocks of their outputs. Markdown is parsed as
+// followed by the blocks of their outputs. JSON and YAML are read as
+// text: code blocks of their lines as written, nothing parsed. Markdown is parsed as
 // CommonMark with the GFM tables, strikethrough, task lists and extended
 // autolinks, rendered to HTML and read as a page is, so its raw HTML gets
 // the same checks; blocks are located in the Markdown.

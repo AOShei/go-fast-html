@@ -82,11 +82,12 @@ const (
 )
 
 // Extractor extracts HTML, Markdown, plain text, EPUB, comma- and
-// tab-separated values, and Jupyter notebooks. The zero value is ready
-// to use and safe for concurrent use.
+// tab-separated values, Jupyter notebooks, and JSON and YAML as text. The
+// zero value is ready to use and safe for concurrent use.
 type Extractor struct {
 	// Format is the format to read the input as: "html", "md", "txt",
-	// "epub", "csv", "tsv" or "ipynb". Empty means to decide it with Detect.
+	// "epub", "csv", "tsv", "ipynb", "json" or "yaml". Empty means to
+	// decide it with Detect.
 	Format string
 	// MaxDepth bounds how deeply elements nest in the tree that is read.
 	// Zero means DefaultMaxDepth.
@@ -97,8 +98,8 @@ type Extractor struct {
 	// Charset is the character encoding the input comes with from outside
 	// it, as a label such as the charset parameter of a MIME Content-Type
 	// gives it ("windows-1251", "shift_jis"): the transport-layer encoding
-	// of the WHATWG encoding sniffing. It applies to HTML, Markdown and
-	// plain text, not to the chapters of an EPUB. A byte order mark
+	// of the WHATWG encoding sniffing. It applies to HTML, Markdown, plain
+	// text, CSV, TSV, JSON and YAML, not to the chapters of an EPUB. A byte order mark
 	// overrides it; it overrides a <meta> declaration and detection. A
 	// label that names no encoding this library decodes is ignored, with
 	// the warning html.charset_unsupported. Empty means none.
@@ -126,26 +127,28 @@ type Extractor struct {
 var _ gofastcore.Extractor = (*Extractor)(nil)
 
 var mimeTypes = map[string]string{"html": "text/html", "md": "text/markdown", "txt": "text/plain", "epub": "application/epub+zip",
-	"csv": "text/csv", "tsv": "text/tab-separated-values", "ipynb": "application/x-ipynb+json"}
+	"csv": "text/csv", "tsv": "text/tab-separated-values", "ipynb": "application/x-ipynb+json",
+	"json": "application/json", "yaml": "application/yaml"}
 
 // Formats lists the formats this library extracts.
 func (e *Extractor) Formats() []string {
-	return []string{"html", "md", "txt", "epub", "csv", "tsv", "ipynb"}
+	return []string{"html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml"}
 }
 
 // Detect decides the format of an input from its name, and failing that
 // from its content: a name ending in .html, .htm, .xhtml or .shtml is
 // HTML; .md, .markdown, .mdown, .mkd, .mkdn or .mdwn Markdown; .txt or
 // .text plain text; .epub EPUB; .csv comma-separated values; .tsv or
-// .tab tab-separated values; .ipynb a Jupyter notebook. A zip archive
+// .tab tab-separated values; .ipynb a Jupyter notebook; .json, .jsonl,
+// .ndjson or .geojson JSON; .yaml or .yml YAML. A zip archive
 // whose first member is "mimetype" saying application/epub+zip is EPUB
 // whatever its name.
 // Without one of those, an input that begins with
 // markup, or has a tag of a common HTML element in its first 4 KiB, is
-// HTML, and any other plain text: Markdown, CSV and notebooks are not
-// guessed from content, since reading plain text as Markdown or CSV would
-// take characters out of it or split it where its author did not, and
-// JSON is a notebook only by its name.
+// HTML, and any other plain text: Markdown, CSV, notebooks, JSON and YAML
+// are not guessed from content, since reading plain text as Markdown or
+// CSV would take characters out of it or split it where its author did
+// not, and a text is JSON, YAML or a notebook only by its name.
 func Detect(name string, src []byte) string {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".csv":
@@ -162,6 +165,10 @@ func Detect(name string, src []byte) string {
 		return "epub"
 	case ".ipynb":
 		return "ipynb"
+	case ".json", ".jsonl", ".ndjson", ".geojson":
+		return "json"
+	case ".yaml", ".yml":
+		return "yaml"
 	}
 	if bytes.HasPrefix(src, []byte("PK\x03\x04")) && len(src) >= 58 && string(src[30:58]) == "mimetypeapplication/epub+zip" {
 		return "epub"
@@ -245,7 +252,9 @@ func (e *Extractor) ExtractFile(ctx context.Context, path string, opts *gofastco
 // content, and returns the document. HTML, Markdown and plain text are one
 // part of kind body; an EPUB is a part of kind chapter for each chapter
 // of its spine; csv and tsv are one part of kind sheet, named by the
-// file, whose rows are table blocks; a notebook is one part of kind body.
+// file, whose rows are table blocks; a notebook is one part of kind body;
+// JSON and YAML are one part of kind body of code blocks, their text as
+// written.
 // With the whole document (Options.Parts unset), script and
 // style text, hidden form values and an EPUB's images no chapter shows
 // follow in a part of kind stored.
@@ -316,6 +325,9 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	}
 	if format == "ipynb" {
 		return e.notebook(ctx, doc, src, opts, text, decode)
+	}
+	if format == "json" || format == "yaml" {
+		return e.dataText(ctx, doc, src, format, opts, text, decode)
 	}
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}
