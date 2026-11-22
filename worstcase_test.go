@@ -104,7 +104,7 @@ func worstCase(t *testing.T, format, src string) {
 	if err := doc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > 5*raceSlowdown*time.Second {
 		t.Errorf("%d bytes took %v", len(src), d)
 	}
 }
