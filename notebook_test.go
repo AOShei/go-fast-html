@@ -416,9 +416,13 @@ func TestNotebookReview(t *testing.T) {
 
 	// Terminal text as JupyterLab shows it.
 	for in, want := range map[string]string{
-		"\x1b[31\nHello world": "[31\nHello world",
-		"abc\b\bX":             "aX",
-		"a\n\bb":               "a\nb",
+		"\x1b[31\nHello world":            "[31\nHello world",
+		"abc\b\bX":                        "aX",
+		"a\n\bb":                          "a\nb",
+		"\x1b]0;title\nreal output\nmore": "]0;title\nreal output\nmore",
+		"\x1b]0;t\x07shown":               "shown",
+		"abc\x1b\ndef":                    "abc\ndef",
+		"a\x1b\x1b[31mb":                  "ab",
 	} {
 		if got := terminal(in); got != want {
 			t.Errorf("terminal(%q) = %q, want %q", in, got, want)

@@ -777,20 +777,28 @@ func terminal(s string) string {
 			} else {
 				i++ // not a sequence: the escape alone is left out
 			}
-		case ']': // OSC: to BEL or ST
-			j := i + 2
-			for j < len(s) {
+		case ']': // OSC: to BEL or ST, on its line
+			j, end := i+2, -1
+			for j < len(s) && s[j] != '\n' {
 				if s[j] == 0x07 {
-					j++
+					end = j + 1
 					break
 				}
 				if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
-					j += 2
+					end = j + 2
 					break
 				}
 				j++
 			}
-			i = j
+			if end >= 0 {
+				i = end
+			} else {
+				i++ // not a sequence: the escape alone is left out
+			}
+		case '\n', '\r', 0x1b:
+			// Not a sequence: the escape alone is left out, and what
+			// follows is read as itself.
+			i++
 		default: // a two-character sequence
 			_, size := utf8.DecodeRuneInString(s[i+1:])
 			i += 1 + size
