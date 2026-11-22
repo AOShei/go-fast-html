@@ -84,13 +84,22 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 		return nil, fmt.Errorf("gofasthtml: %v: %w", err, gofastcore.ErrMalformed)
 	}
 	doc.Metadata = epubMetadata(pkg)
-	if pkg.MetaCut {
-		doc.Warn(gofastcore.SeverityInfo, WarnMetadataTruncated,
-			fmt.Sprintf("the text of a metadata element of the package document was cut at %d KiB", epub.MaxMeta>>10))
+	if pkg.MetaCut > 0 {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("%s of the package document longer than %d KiB, cut there",
+				count(pkg.MetaCut, "metadata element has text", "metadata elements have text"), epub.MaxMeta>>10))
 	}
 	if pkg.DCLeftOut > 0 {
-		doc.Warn(gofastcore.SeverityInfo, WarnMetadataTruncated,
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			fmt.Sprintf("the package document has more than %d Dublin Core elements; %s left out", epub.MaxDC, count(pkg.DCLeftOut, "was", "were")))
+	}
+	if pkg.ManifestLeftOut > 0 {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the manifest has more than %d items; %s left out", epub.MaxItems, count(pkg.ManifestLeftOut, "was", "were")))
+	}
+	if pkg.SpineLeftOut > 0 {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the spine has more than %d entries; %s left out", epub.MaxItems, count(pkg.SpineLeftOut, "was", "were")))
 	}
 	encrypted, encErr := a.Encryption(decode)
 	locked := func(p string) string { return encrypted[p] }
@@ -423,7 +432,7 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 	}
 	overBudget := 0 // images whose data passed the limit on decoded bytes
 	encImages := 0  // images encryption.xml lists, whose data is not read
-	pc := pageConfig{opts: opts, text: text, decode: decode,
+	pc := pageConfig{opts: opts, text: text, decode: decode, chapter: true,
 		xhtml: it.MediaType != "text/html",
 		image: func(src string) (blocks.ImageRef, bool) {
 			p, ok := epub.Resolve(it.Path, src)
@@ -467,6 +476,10 @@ func (e *Extractor) chapter(ctx context.Context, a *epub.Archive, pkg *epub.Pack
 	}
 	if res != nil {
 		part.Name = res.Meta.Title
+		if res.TitleCut {
+			part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+				fmt.Sprintf("the chapter's title is longer than %d KiB; its name is cut there", blocks.MaxMeta>>10))
+		}
 	}
 	return res != nil && res.Cut, nil
 }

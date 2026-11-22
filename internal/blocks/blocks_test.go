@@ -152,7 +152,7 @@ func TestActiveAndMeta(t *testing.T) {
 		t.Errorf("json script %+v", last)
 	}
 	long := strings.Repeat("x", MaxMeta+10)
-	if r := walk(t, "<title>"+long+"</title>", Config{}); !r.MetaCut || len(r.Meta.Title) != MaxMeta {
+	if r := walk(t, "<title>"+long+"</title>", Config{}); r.MetaCut != 1 || !r.TitleCut || len(r.Meta.Title) != MaxMeta {
 		t.Errorf("meta cut %v %d", r.MetaCut, len(r.Meta.Title))
 	}
 }
@@ -183,10 +183,17 @@ func TestHelpers(t *testing.T) {
 	}
 	d, _ := dom.Parse(context.Background(), []byte(`<pre class="x lang-Go"><code class="language-rust">`), dom.Options{})
 	pre := d.Root.FirstChild
-	if got := codeLanguage(pre); got != "go" {
+	if got, long := codeLanguage(pre); got != "go" || long {
 		t.Errorf("codeLanguage %q", got)
 	}
 	if v, ok := parseInt(" 12abc"); !ok || v != 12 {
 		t.Error("parseInt")
+	}
+	// Not cut to fewer digits: exact up to 18 digits, invalid past them.
+	if v, ok := parseInt("-123456789012345678"); !ok || v != -123456789012345678 {
+		t.Errorf("parseInt 18 digits: %d %v", v, ok)
+	}
+	if _, ok := parseInt("1234567890123456789"); ok {
+		t.Error("parseInt 19 digits")
 	}
 }

@@ -197,12 +197,12 @@ func TestPackageMetadataBounds(t *testing.T) {
 	long := strings.Repeat("w", MaxMeta+100)
 	for _, desc := range []string{long, long[:MaxMeta/2] + "<!--c-->" + long[MaxMeta/2:]} {
 		p := parsePackage("p.opf", []byte(`<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description>`+desc+`</dc:description></metadata></package>`))
-		if len(p.DC) != 1 || len(p.DC[0].Value) != MaxMeta || !p.MetaCut {
+		if len(p.DC) != 1 || len(p.DC[0].Value) != MaxMeta || p.MetaCut != 1 {
 			t.Errorf("description of %d bytes, cut %v", len(p.DC[0].Value), p.MetaCut)
 		}
 	}
 	p := parsePackage("p.opf", []byte(`<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>`+long[:MaxMeta]+`</dc:title></metadata></package>`))
-	if p.MetaCut || len(p.DC[0].Value) != MaxMeta {
+	if p.MetaCut != 0 || len(p.DC[0].Value) != MaxMeta {
 		t.Errorf("a value of exactly MaxMeta bytes: cut %v", p.MetaCut)
 	}
 	var b strings.Builder
@@ -212,7 +212,7 @@ func TestPackageMetadataBounds(t *testing.T) {
 	}
 	b.WriteString("</metadata></package>")
 	p = parsePackage("p.opf", []byte(b.String()))
-	if len(p.DC) != MaxDC || p.DCLeftOut != 7 || p.MetaCut {
+	if len(p.DC) != MaxDC || p.DCLeftOut != 7 || p.MetaCut != 0 {
 		t.Errorf("%d elements, %d left out", len(p.DC), p.DCLeftOut)
 	}
 }
@@ -270,5 +270,26 @@ func TestTOCBounds(t *testing.T) {
 	// Exactly MaxEntries is not cut.
 	if got, cut := NCX("toc.ncx", []byte(strings.Replace(ncx.String(), `<navPoint><navLabel><text>E</text></navLabel></navPoint>`, "", 2))); len(got) != MaxEntries || cut.Entries {
 		t.Errorf("ncx exact: %d entries, %+v", len(got), cut)
+	}
+}
+
+// Manifest items and spine entries past MaxItems are counted.
+func TestPackageItemsBound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("a million entries")
+	}
+	var b strings.Builder
+	b.WriteString("<package><manifest>")
+	for range MaxItems + 2 {
+		b.WriteString("<item/>")
+	}
+	b.WriteString("</manifest><spine>")
+	for range MaxItems + 3 {
+		b.WriteString("<itemref/>")
+	}
+	b.WriteString("</spine></package>")
+	p := parsePackage("p.opf", []byte(b.String()))
+	if len(p.Manifest) != MaxItems || p.ManifestLeftOut != 2 || len(p.Spine) != MaxItems || p.SpineLeftOut != 3 {
+		t.Errorf("manifest %d+%d, spine %d+%d", len(p.Manifest), p.ManifestLeftOut, len(p.Spine), p.SpineLeftOut)
 	}
 }

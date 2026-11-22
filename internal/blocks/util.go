@@ -19,7 +19,9 @@ func (w *walker) title(n *dom.Node) {
 	}
 	w.res.Title = true
 	t := cleanProse(string(textOf(n)), true)
+	before := w.res.MetaCut
 	w.res.Meta.Title = w.metaValue(t)
+	w.res.TitleCut = w.res.MetaCut > before
 }
 
 func (w *walker) meta(n *dom.Node) {
@@ -35,33 +37,34 @@ func (w *walker) meta(n *dom.Node) {
 	}
 	name, _ := n.Attr("name")
 	m := &w.res.Meta
-	v := w.metaValue(cleanProse(content, true))
+	v := cleanProse(content, true)
 	if v == "" {
 		return
 	}
+	// A value is cut, and counted, only where it is used.
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "author":
-		if len(m.Authors) < 256 {
-			m.Authors = append(m.Authors, v)
+		if len(m.Authors) < MaxMetaList {
+			m.Authors = append(m.Authors, w.metaValue(v))
 		} else {
-			w.res.MetaCut = true
+			w.res.AuthorsLeftOut++
 		}
 	case "description":
 		if m.Extra == nil {
 			m.Extra = map[string]string{}
 		}
 		if _, ok := m.Extra["description"]; !ok {
-			m.Extra["description"] = v
+			m.Extra["description"] = w.metaValue(v)
 		}
 	case "keywords":
-		if len(m.Keywords) < 256 {
-			m.Keywords = append(m.Keywords, v)
+		if len(m.Keywords) < MaxMetaList {
+			m.Keywords = append(m.Keywords, w.metaValue(v))
 		} else {
-			w.res.MetaCut = true
+			w.res.KeywordsLeftOut++
 		}
 	case "generator":
 		if m.Application == "" {
-			m.Application = v
+			m.Application = w.metaValue(v)
 		}
 	}
 }
@@ -70,7 +73,7 @@ func (w *walker) metaValue(s string) string {
 	if len(s) <= MaxMeta {
 		return s
 	}
-	w.res.MetaCut = true
+	w.res.MetaCut++
 	n := MaxMeta
 	for n > 0 && s[n]&0xC0 == 0x80 {
 		n--
@@ -141,7 +144,7 @@ func (w *walker) image(n *dom.Node) {
 		}
 	}
 	w.later(gofastcore.Block{Kind: gofastcore.KindImage, Text: cleanProse(alt, true), Image: img,
-		Display: n.Display, Loc: w.loc(n.Start, n.End, anchorOf(n))})
+		Display: n.Display, Loc: w.loc(n.Start, n.End, w.anchorOf(n))})
 }
 
 // ImageRef is an image a page refers to that is inside the container the
@@ -259,8 +262,9 @@ func cleanRef(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// anchorOf returns n's id, or for an <a>, its name.
-func anchorOf(n *dom.Node) string {
+// anchorOf returns n's id, or for an <a>, its name; an id longer than
+// MaxAnchor is not used, and counted.
+func (w *walker) anchorOf(n *dom.Node) string {
 	id, ok := n.Attr("id")
 	if !ok && n.Name == "a" {
 		id, ok = n.Attr("name")
@@ -270,14 +274,22 @@ func anchorOf(n *dom.Node) string {
 	}
 	id = cleanRef(id)
 	if len(id) > MaxAnchor {
+		if !w.longIDs[n] {
+			if w.longIDs == nil {
+				w.longIDs = map[*dom.Node]bool{}
+			}
+			w.longIDs[n] = true
+			w.res.AnchorsLeftOut++
+		}
 		return ""
 	}
 	return id
 }
 
 // codeLanguage reads the language of a code block from a class such as
-// "language-go" or "lang-go" on the element or the code element in it.
-func codeLanguage(n *dom.Node) string {
+// "language-go" or "lang-go" on the element or the code element in it. A
+// language longer than MaxLang is left out, and long reports it.
+func codeLanguage(n *dom.Node) (lang string, long bool) {
 	for _, e := range []*dom.Node{n, firstElement(n, "code")} {
 		if e == nil {
 			continue
@@ -285,13 +297,17 @@ func codeLanguage(n *dom.Node) string {
 		class, _ := e.Attr("class")
 		for _, c := range strings.Fields(class) {
 			for _, p := range []string{"language-", "lang-"} {
-				if l, ok := strings.CutPrefix(c, p); ok && l != "" && len(l) <= 64 {
-					return cleanRef(strings.ToLower(l))
+				if l, ok := strings.CutPrefix(c, p); ok && l != "" {
+					if len(l) > MaxLang {
+						long = true
+						continue
+					}
+					return cleanRef(strings.ToLower(l)), false
 				}
 			}
 		}
 	}
-	return ""
+	return "", long
 }
 
 func firstElement(n *dom.Node, name string) *dom.Node {
@@ -330,14 +346,21 @@ func loadsResource(rel string) bool {
 	return false
 }
 
+// parseInt reads the integer at the start of s, as the HTML rules for
+// parsing integers do. A number of more than 18 digits is not valid
+// (an overflow, as browsers find it); it is not cut to fewer digits.
 func parseInt(s string) (int64, bool) {
 	s = strings.TrimSpace(s)
-	end := 0
-	if end < len(s) && (s[end] == '-' || s[end] == '+') {
+	sign := 0
+	if sign < len(s) && (s[sign] == '-' || s[sign] == '+') {
+		sign++
+	}
+	end := sign
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
 		end++
 	}
-	for end < len(s) && s[end] >= '0' && s[end] <= '9' && end < 12 {
-		end++
+	if end-sign > 18 {
+		return 0, false
 	}
 	v, err := strconv.ParseInt(s[:end], 10, 64)
 	return v, err == nil

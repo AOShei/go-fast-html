@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/AOShei/go-fast-core"
+	"github.com/AOShei/go-fast-html/internal/blocks"
 	"github.com/AOShei/go-fast-html/internal/epub"
 )
 
@@ -232,7 +233,7 @@ func TestEPUBOutlineAndMetadataBounds(t *testing.T) {
 	desc := strings.Repeat("word ", 20000)
 	for _, d := range []string{desc, desc[:30000] + "<!--c-->" + desc[30000:]} {
 		doc = extractEPUB(t, chapterEPUB(t, chapters, "", "<dc:description>"+d+"</dc:description>"), nil)
-		if w := warnings(doc, WarnMetadataTruncated); len(w) != 1 || len(doc.Metadata.Extra["description"]) > epub.MaxMeta || len(doc.Metadata.Extra["description"]) < epub.MaxMeta-8 {
+		if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || len(doc.Metadata.Extra["description"]) > epub.MaxMeta || len(doc.Metadata.Extra["description"]) < epub.MaxMeta-8 {
 			t.Errorf("description: %q, %d bytes", w, len(doc.Metadata.Extra["description"]))
 		}
 	}
@@ -241,7 +242,7 @@ func TestEPUBOutlineAndMetadataBounds(t *testing.T) {
 		fmt.Fprintf(&creators, "<dc:creator>C%d</dc:creator>", i)
 	}
 	doc = extractEPUB(t, chapterEPUB(t, chapters, "", creators.String()), nil)
-	if w := warnings(doc, WarnMetadataTruncated); len(w) != 1 || !strings.Contains(w[0], "7 were left out") {
+	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.Contains(w[0], "7 were left out") {
 		t.Errorf("creators: %q, %d authors", w, len(doc.Metadata.Authors))
 	}
 
@@ -625,5 +626,67 @@ func TestNameLeftOut(t *testing.T) {
 	nameLeftOut(&p, true)
 	if len(p.Warnings) != 1 || !strings.HasSuffix(p.Warnings[0].Message, "the chapter's name was left out too") {
 		t.Errorf("with the cut warning: %+v", p.Warnings)
+	}
+}
+
+// Every bound that cuts a string of the output is limit.exceeded, once
+// per bound, with a count; html.metadata_truncated is not raised.
+func TestOutputCuts(t *testing.T) {
+	long := strings.Repeat("x", blocks.MaxMeta+10)
+	var page strings.Builder
+	page.WriteString(`<html lang="` + strings.Repeat("l", blocks.MaxLang+1) + `"><title>` + long + `</title>`)
+	page.WriteString(`<meta name=description content="` + long + `">`)
+	for i := range blocks.MaxMetaList + 3 {
+		fmt.Fprintf(&page, `<meta name=author content="A%d"><meta name=keywords content="K%d">`, i, i)
+	}
+	id := strings.Repeat("i", blocks.MaxAnchor+1)
+	page.WriteString(`<p id="` + id + `">one <span id="` + id + `x">s</span></p><p id="` + id + `y">two</p>`)
+	page.WriteString(`<pre class="language-` + strings.Repeat("g", blocks.MaxLang+1) + `">code</pre><pre class="language-go">go</pre>`)
+	doc := extract(t, page.String(), nil)
+	want := []string{
+		"0: 2 metadata values are longer than 64 KiB and cut there",
+		"0: the page declares more than 256 authors; 3 were left out",
+		"0: the page has more than 256 keyword declarations; 3 were left out",
+		"0: the html element's lang is longer than 64 bytes and was left out",
+		"1: 3 elements have an id (or an a its name) longer than 1024 bytes, not used as Loc.Anchor",
+		"1: 1 code block declares a language longer than 64 bytes, left out",
+	}
+	got := warnings(doc, gofastcore.WarnLimitExceeded)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	for p, w := range doc.AllWarnings() {
+		_ = p
+		if w.Code == WarnMetadataTruncated || w.Code == gofastcore.WarnLimitExceeded && w.Severity != gofastcore.SeverityError {
+			t.Errorf("%+v", w)
+		}
+	}
+	if doc.Metadata.Language != "" || len(doc.Metadata.Title) != blocks.MaxMeta || len(doc.Metadata.Authors) != blocks.MaxMetaList {
+		t.Errorf("metadata %q %d %d", doc.Metadata.Language, len(doc.Metadata.Title), len(doc.Metadata.Authors))
+	}
+
+	// Markdown: the language of a fenced code block.
+	md := extractAs(t, "md", "```"+strings.Repeat("g", blocks.MaxLang+1)+"\ncode\n```\n", nil)
+	if w := warnings(md, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.Contains(w[0], "language") {
+		t.Errorf("md: %q", w)
+	}
+
+	// Within the bounds: nothing.
+	ok := extract(t, `<html lang="`+strings.Repeat("l", blocks.MaxLang)+`"><title>t</title><p id="`+strings.Repeat("i", blocks.MaxAnchor)+`">x</p>`+
+		`<pre class="language-`+strings.Repeat("g", blocks.MaxLang)+`">c</pre>`, nil)
+	if len(warnings(ok, gofastcore.WarnLimitExceeded)) != 0 || ok.Parts[0].Blocks[0].Loc.Anchor == "" {
+		t.Errorf("within the bounds: %+v", ok.Warnings)
+	}
+}
+
+// An EPUB chapter's title cut as its name is reported on the chapter;
+// its other metadata, which the document does not use, is not.
+func TestEPUBChapterTitleCut(t *testing.T) {
+	long := strings.Repeat("x", blocks.MaxMeta+10)
+	b := chapterEPUB(t, []string{"c1.xhtml", `<html xmlns="http://www.w3.org/1999/xhtml" lang="` + strings.Repeat("l", 100) + `"><head><title>` + long +
+		`</title><meta name="description" content="` + long + `"/></head><body><p>one</p></body></html>`}, "", "")
+	doc := extractEPUB(t, b, nil)
+	if w := warnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || w[0] != "1: the chapter's title is longer than 64 KiB; its name is cut there" || len(doc.Parts[0].Name) != blocks.MaxMeta {
+		t.Errorf("%q", w)
 	}
 }

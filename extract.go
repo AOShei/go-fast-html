@@ -72,11 +72,12 @@ const (
 	// each other; their text is all there, and the reasons it is hidden
 	// are kept, but the blocks there may be joined or split differently.
 	WarnNestingFlattened = "html.nesting_flattened"
-	// WarnMetadataTruncated: a metadata value was longer than 64 KiB and
-	// was cut there, or there were more than 256 authors or keyword
-	// declarations and the rest were left out; or an EPUB's package
-	// document has more than 4096 Dublin Core elements, and the rest were
-	// left out.
+	// WarnMetadataTruncated was raised by v0.1.1 and earlier when a
+	// metadata value was cut or declarations were left out.
+	//
+	// Deprecated: since v0.1.2 those cuts are reported with
+	// gofastcore.WarnLimitExceeded, as every bound that cuts output is,
+	// and this code is not raised.
 	WarnMetadataTruncated = "html.metadata_truncated"
 )
 
@@ -293,7 +294,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 // document as a whole.
 type tally struct {
 	active, external int
-	metaCut          bool
+	meta             metaCuts
 	charsets         []string           // declared encodings not decoded, each once
 	charsetCount     map[string]int     // how many pages declare each
 	transport        string             // Extractor.Charset, when not decoded
@@ -334,8 +335,39 @@ func (t *tally) finish(doc *gofastcore.Document) {
 		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnInputExternalReference,
 			fmt.Sprintf("%d resources loaded from elsewhere, not counting hyperlinks; nothing was fetched", t.external))
 	}
-	if t.metaCut {
-		doc.Warn(gofastcore.SeverityInfo, WarnMetadataTruncated, "a metadata value was cut at 64 KiB, or declarations past 256 were left out")
+	t.meta.warn(doc)
+}
+
+// metaCuts counts what the bounds on a page's metadata cut.
+type metaCuts struct {
+	values, authors, keywords int
+	lang                      bool
+}
+
+func (m *metaCuts) add(r *blocks.Result) {
+	m.values += r.MetaCut
+	m.authors += r.AuthorsLeftOut
+	m.keywords += r.KeywordsLeftOut
+	m.lang = m.lang || r.LangLeftOut
+}
+
+// warn adds a limit.exceeded to the document for each bound reached.
+func (m *metaCuts) warn(doc *gofastcore.Document) {
+	if m.values > 0 {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			count(m.values, "metadata value is", "metadata values are")+fmt.Sprintf(" longer than %d KiB and cut there", blocks.MaxMeta>>10))
+	}
+	if m.authors > 0 {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the page declares more than %d authors; %s left out", blocks.MaxMetaList, count(m.authors, "was", "were")))
+	}
+	if m.keywords > 0 {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the page has more than %d keyword declarations; %s left out", blocks.MaxMetaList, count(m.keywords, "was", "were")))
+	}
+	if m.lang {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the html element's lang is longer than %d bytes and was left out", blocks.MaxLang))
 	}
 }
 
@@ -352,6 +384,8 @@ type pageConfig struct {
 	internal func(ref string) bool
 	// charset is the caller's transport-layer encoding label.
 	charset string
+	// chapter: the page is a chapter of an EPUB.
+	chapter bool
 	// noDataElsewhere counts the images whose data image reported
 	// missing for a reason warned of elsewhere (a limit, encryption),
 	// which image.unsupported_encoding leaves out.
@@ -465,7 +499,19 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	}
 	t.active += res.Active
 	t.external += res.External
-	t.metaCut = t.metaCut || res.MetaCut
+	if !pc.chapter {
+		// An EPUB chapter's metadata is not the document's: only its
+		// title is used, as the chapter's name.
+		t.meta.add(res)
+	}
+	if res.AnchorsLeftOut > 0 {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			count(res.AnchorsLeftOut, "element has an id", "elements have an id")+fmt.Sprintf(" (or an a its name) longer than %d bytes, not used as Loc.Anchor", blocks.MaxAnchor))
+	}
+	if res.LanguagesLeftOut > 0 {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			count(res.LanguagesLeftOut, "code block declares a language", "code blocks declare a language")+fmt.Sprintf(" longer than %d bytes, left out", blocks.MaxLang))
+	}
 	t.stored = append(t.stored, res.Stored...)
 	if n := res.ImageBudget; n > 0 {
 		msg := "the limit on decoded bytes was reached; 1 data: image was not decoded and has no ID or data"

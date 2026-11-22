@@ -62,7 +62,7 @@ func (w *walker) attrNotes(n *dom.Node) {
 		}
 		w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: v,
 			Attrs: map[string]string{gofastcore.AttrNoteType: NoteAttribute, AttrAttribute: a.Name},
-			Loc:   w.loc(a.ValStart, a.ValEnd, anchorOf(n))})
+			Loc:   w.loc(a.ValStart, a.ValEnd, w.anchorOf(n))})
 	}
 }
 

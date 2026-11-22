@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.1.2 (2026-11-22)
+
+Every fixed bound that cuts a string of the output now reports it with
+`limit.exceeded` (severity error), once per bound per part, with a
+count, as the series' rule says. Output for input that reaches none of
+these bounds is unchanged.
+
+- **`html.metadata_truncated` is no longer raised**; the constant
+  `WarnMetadataTruncated` stays, deprecated. Its cases are
+  `limit.exceeded` on the document: metadata values over 64 KiB (HTML
+  `<title>` and `meta` values, EPUB package metadata text), `author` and
+  `keywords` declarations past 256, Dublin Core elements past 4,096. A
+  value is counted only where it is used (a second `description` is not).
+- **`<html lang>` over 64 bytes**, left out of `Metadata.Language`, now
+  gives the document `limit.exceeded`.
+- **An `id` (or an `a`'s `name`) over 1,024 bytes**, not used as
+  `Loc.Anchor`, and **a code block's language over 64 bytes** (HTML class
+  or Markdown info string), left out of `Attrs["language"]`, now give the
+  part `limit.exceeded` with the count.
+- **An EPUB chapter's `<title>` over 64 KiB**, cut as the chapter's name,
+  gives the chapter `limit.exceeded`. The chapter's other metadata, which
+  the document does not use, gives no warning (before, any of it gave the
+  document `html.metadata_truncated`).
+- **EPUB manifest items and spine entries past 2^20**, left out, now give
+  the document `limit.exceeded`.
+- **Number attributes** (`start`, `value`, `colspan`, `rowspan`, `width`,
+  `height`) are no longer cut to their first 12 characters, which read a
+  longer number as a different one: up to 18 digits are read in full,
+  and a longer number is invalid and ignored.
+
 ## v0.1.1 (2026-11-22)
 
 - Built on go-fast-core v0.1.1: a part or document keeps at most 1,000

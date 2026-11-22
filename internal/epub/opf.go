@@ -25,6 +25,10 @@ const MaxMeta = 64 << 10
 // out.
 const MaxDC = 4096
 
+// MaxItems bounds the manifest items and the spine entries read; the
+// rest are left out.
+const MaxItems = 1 << 20
+
 // MaxEncrypted bounds the number of members encryption.xml may list.
 const MaxEncrypted = 1 << 20
 
@@ -60,9 +64,12 @@ type Package struct {
 	ByPath   map[string]*Item
 	Spine    []SpineItem
 	NCX      string // manifest id of the NCX, from spine@toc
-	// MetaCut reports that the text of a metadata element was longer
-	// than MaxMeta and was cut there.
-	MetaCut bool
+	// MetaCut counts the metadata elements whose text was longer than
+	// MaxMeta, cut there.
+	MetaCut int
+	// ManifestLeftOut and SpineLeftOut count the manifest items and
+	// spine entries past MaxItems, left out.
+	ManifestLeftOut, SpineLeftOut int
 	// DCLeftOut counts the Dublin Core elements past MaxDC, which were
 	// left out.
 	DCLeftOut int
@@ -213,12 +220,16 @@ func parsePackage(opfPath string, b []byte) *Package {
 				if path, ok := Resolve(opfPath, it.Href); ok && it.Href != "" {
 					it.Path = path
 				}
-				if len(p.Manifest) < 1<<20 {
+				if len(p.Manifest) < MaxItems {
 					p.Manifest = append(p.Manifest, it)
+				} else {
+					p.ManifestLeftOut++
 				}
 			case "itemref":
-				if len(p.Spine) < 1<<20 {
+				if len(p.Spine) < MaxItems {
 					p.Spine = append(p.Spine, SpineItem{IDRef: attr(t, "idref"), Linear: !strings.EqualFold(strings.TrimSpace(attr(t, "linear")), "no")})
+				} else {
+					p.SpineLeftOut++
 				}
 			case "spine":
 				p.NCX = attr(t, "toc")
@@ -237,12 +248,15 @@ func parsePackage(opfPath string, b []byte) *Package {
 			case t.Name.Local == "metadata":
 				inMeta = false
 			case inMeta && t.Name.Local == "meta" && attr(cur, "property") != "":
+				// Of these only dcterms:modified is used, as a date,
+				// which a value of MaxMeta bytes is not.
 				p.Meta[attr(cur, "property")] = string(text)
-				p.MetaCut = p.MetaCut || textCut
 			case inMeta && (t.Name.Space == dcNS || t.Name.Space == "dc" || t.Name.Space == "") && cur.Name.Local == t.Name.Local && t.Name.Local != "meta":
 				if len(p.DC) < MaxDC {
 					p.DC = append(p.DC, DC{Name: t.Name.Local, Value: string(text), ID: attr(cur, "id")})
-					p.MetaCut = p.MetaCut || textCut
+					if textCut {
+						p.MetaCut++
+					}
 				} else {
 					p.DCLeftOut++
 				}
