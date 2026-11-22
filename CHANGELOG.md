@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.2.0 (2026-11-22)
+
+Comma- and tab-separated values. Output for the other formats is
+unchanged; a file named `.csv`, `.tsv` or `.tab` that was read as plain
+text (or HTML) by `Detect` is now read as CSV or TSV.
+
+- **New formats `csv` and `tsv`** (`text/csv`, `text/tab-separated-values`),
+  detected by the name only (`.csv`; `.tsv`, `.tab`), never by content.
+  One part of kind `sheet`, named by the file; its rows are `table`
+  blocks, padded to the widest row, split every 1,000 rows (or 2^20
+  cells) with `Continued` and an A1 `Loc.Range` on each piece. Trailing
+  rows with no text are left out. No header row is inferred; cells are
+  text.
+- **The delimiter**: an Excel `sep=` first line, the new
+  `Extractor.Delimiter`, tab for `tsv`, or sniffed among `,` `;` tab `|`
+  for `csv`; recorded in `Metadata.Extra["delimiter"]` and
+  `["delimiter_source"]`.
+  The delimiter is written `U+XXXX` when it is a control character other
+  than tab or a ligature. A first row longer than the 64 KiB sniffing
+  window is skipped so that the rows after it decide.
+- **`Extractor.Header`** declares a header row (MIME `header=present`).
+- **Quoting**: on by default for csv and tsv alike (Excel, pandas,
+  Python's `excel-tab`); the new `Extractor.NoQuotes` (`-no-quotes`)
+  reads quotes as characters, as IANA's `text/tab-separated-values` has
+  it.
+- **Rows with no text** are decided after control characters are
+  dropped: a trailing row of control characters is left out, and a file
+  of them alone has no table and `part.no_text`.
+- **Lenient RFC 4180 reading**, with one `input.repaired` per part giving
+  the number of rows output with a quote outside the rules (rows the
+  text budget refuses are not counted, nor are their cut fields).
+- **Bounds**: fields past column 16,384 (`MaxCSVColumns`) and field text
+  past 1 MiB (`MaxCSVField`) give `limit.exceeded` with a count; the text
+  budget cutting the sheet gives the number of rows not read.
+- **Command**: `-as csv|tsv`, `-delimiter`, `-header`; directories give
+  their `.csv`, `.tsv` and `.tab` files. An EPUB's embedded CSV is not
+  handed to the CSV reader (unchanged).
+- `FuzzCSV`.
+
 ## v0.1.2 (2026-11-22)
 
 Every fixed bound that cuts a string of the output now reports it with

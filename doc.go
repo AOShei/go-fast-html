@@ -1,6 +1,8 @@
-// Package gofasthtml extracts HTML, Markdown, plain text and EPUB into the
-// shared go-fast document model, gofastcore.Document. An EPUB is a part
-// for each chapter of its spine, read as XHTML. Markdown is parsed as
+// Package gofasthtml extracts HTML, Markdown, plain text, EPUB, and comma-
+// and tab-separated values into the shared go-fast document model,
+// gofastcore.Document. An EPUB is a part for each chapter of its spine,
+// read as XHTML. A CSV or TSV file is one part of kind sheet whose rows
+// are table blocks. Markdown is parsed as
 // CommonMark with the GFM tables, strikethrough, task lists and extended
 // autolinks, rendered to HTML and read as a page is, so its raw HTML gets
 // the same checks; blocks are located in the Markdown.
