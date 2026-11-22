@@ -278,7 +278,7 @@ func metaText(s string, t *tally) string {
 		s = s[:n]
 		t.meta.values++
 	}
-	return strings.TrimSpace(string(cleanAppend(nil, []byte(strings.ToValidUTF8(s, "�")))))
+	return strings.TrimSpace(string(cleanAppend(nil, []byte(strings.ToValidUTF8(s, "\uFFFD")))))
 }
 
 // metadata reads the notebook's metadata: its title and authors, and the

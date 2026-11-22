@@ -282,8 +282,9 @@ func TestNotebookLenient(t *testing.T) {
 	if len(w) != 1 || !strings.HasPrefix(w[0], "5 values have") {
 		t.Errorf("warnings: %q", w)
 	}
-	bad := nb(mdCell("x", "caf\xe9"))
-	bad = strings.Replace(bad, `caf�`, "caf\xe9", 1)
+	// The invalid byte is written directly: json.Marshal replaces it, and
+	// how it writes the replacement differs between Go versions.
+	bad := `{"nbformat": 4, "cells": [{"cell_type": "markdown", "source": "caf` + "\xe9" + `"}]}`
 	doc = nbDoc(t, bad, nil)
 	if w := csvWarnings(doc, gofastcore.WarnTextUnmappedGlyphs); len(w) != 1 {
 		t.Errorf("invalid UTF-8: %q", w)
