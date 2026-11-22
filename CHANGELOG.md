@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 (2026-11-22)
 
 Comma- and tab-separated values. Output for the other formats is
 unchanged; a file named `.csv`, `.tsv` or `.tab` that was read as plain
