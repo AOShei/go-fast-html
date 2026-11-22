@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+Comma- and tab-separated values. Output for the other formats is
+unchanged; a file named `.csv`, `.tsv` or `.tab` that was read as plain
+text (or HTML) by `Detect` is now read as CSV or TSV.
+
+- **New formats `csv` and `tsv`** (`text/csv`, `text/tab-separated-values`),
+  detected by the name only (`.csv`; `.tsv`, `.tab`), never by content.
+  One part of kind `sheet`, named by the file; its rows are `table`
+  blocks, padded to the widest row, split every 1,000 rows (or 2^20
+  cells) with `Continued` and an A1 `Loc.Range` on each piece. Trailing
+  rows with no text are left out. No header row is inferred; cells are
+  text.
+- **The delimiter**: an Excel `sep=` first line, the new
+  `Extractor.Delimiter`, tab for `tsv`, or sniffed among `,` `;` tab `|`
+  for `csv`; recorded in `Metadata.Extra["delimiter"]` and
+  `["delimiter_source"]`.
+- **`Extractor.Header`** declares a header row (MIME `header=present`).
+- **Lenient RFC 4180 reading**, with one `input.repaired` per part giving
+  the number of rows with a quote outside the rules.
+- **Bounds**: fields past column 16,384 (`MaxCSVColumns`) and field text
+  past 1 MiB (`MaxCSVField`) give `limit.exceeded` with a count; the text
+  budget cutting the sheet gives the number of rows not read.
+- **Command**: `-as csv|tsv`, `-delimiter`, `-header`; directories give
+  their `.csv`, `.tsv` and `.tab` files. An EPUB's embedded CSV is not
+  handed to the CSV reader (unchanged).
+- `FuzzCSV`.
+
 ## v0.1.2 (2026-11-22)
 
 Every fixed bound that cuts a string of the output now reports it with
