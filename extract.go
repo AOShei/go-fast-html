@@ -81,11 +81,12 @@ const (
 	WarnMetadataTruncated = "html.metadata_truncated"
 )
 
-// Extractor extracts HTML, Markdown, plain text and EPUB. The zero value
-// is ready to use and safe for concurrent use.
+// Extractor extracts HTML, Markdown, plain text, EPUB, and comma- and
+// tab-separated values. The zero value is ready to use and safe for
+// concurrent use.
 type Extractor struct {
-	// Format is the format to read the input as: "html", "md", "txt" or
-	// "epub". Empty means to decide it with Detect.
+	// Format is the format to read the input as: "html", "md", "txt",
+	// "epub", "csv" or "tsv". Empty means to decide it with Detect.
 	Format string
 	// MaxDepth bounds how deeply elements nest in the tree that is read.
 	// Zero means DefaultMaxDepth.
@@ -102,26 +103,44 @@ type Extractor struct {
 	// label that names no encoding this library decodes is ignored, with
 	// the warning html.charset_unsupported. Empty means none.
 	Charset string
+	// Delimiter separates the fields of csv and tsv input. A first line
+	// "sep=X", Excel's declaration, overrides it. Zero means tab for tsv
+	// and, for csv, the one of , ; tab | that splits the most of the
+	// first rows into the same number of fields, more than one, else the
+	// comma. A quote or a line end cannot be a delimiter; Extract returns
+	// an error wrapping gofastcore.ErrUnsupported for one.
+	Delimiter rune
+	// Header says that the first row of csv or tsv input is a header row,
+	// as RFC 4180's MIME parameter header=present declares; its table
+	// then has HeaderRows 1. A header row is never inferred.
+	Header bool
 }
 
 var _ gofastcore.Extractor = (*Extractor)(nil)
 
-var mimeTypes = map[string]string{"html": "text/html", "md": "text/markdown", "txt": "text/plain", "epub": "application/epub+zip"}
+var mimeTypes = map[string]string{"html": "text/html", "md": "text/markdown", "txt": "text/plain", "epub": "application/epub+zip",
+	"csv": "text/csv", "tsv": "text/tab-separated-values"}
 
 // Formats lists the formats this library extracts.
-func (e *Extractor) Formats() []string { return []string{"html", "md", "txt", "epub"} }
+func (e *Extractor) Formats() []string { return []string{"html", "md", "txt", "epub", "csv", "tsv"} }
 
 // Detect decides the format of an input from its name, and failing that
 // from its content: a name ending in .html, .htm, .xhtml or .shtml is
 // HTML; .md, .markdown, .mdown, .mkd, .mkdn or .mdwn Markdown; .txt or
-// .text plain text; .epub EPUB. A zip archive whose first member is
+// .text plain text; .epub EPUB; .csv comma-separated values; .tsv or
+// .tab tab-separated values. A zip archive whose first member is
 // "mimetype" saying application/epub+zip is EPUB whatever its name.
 // Without one of those, an input that begins with
 // markup, or has a tag of a common HTML element in its first 4 KiB, is
-// HTML, and any other plain text: Markdown is not guessed from content,
-// since reading plain text as Markdown would take characters out of it.
+// HTML, and any other plain text: Markdown and CSV are not guessed from
+// content, since reading plain text as either would take characters out
+// of it or split it where its author did not.
 func Detect(name string, src []byte) string {
 	switch strings.ToLower(filepath.Ext(name)) {
+	case ".csv":
+		return "csv"
+	case ".tsv", ".tab":
+		return "tsv"
 	case ".html", ".htm", ".xhtml", ".shtml":
 		return "html"
 	case ".md", ".markdown", ".mdown", ".mkd", ".mkdn", ".mdwn":
@@ -211,7 +230,8 @@ func (e *Extractor) ExtractFile(ctx context.Context, path string, opts *gofastco
 // in the format e.Format names or Detect decides from Options.Name and the
 // content, and returns the document. HTML, Markdown and plain text are one
 // part of kind body; an EPUB is a part of kind chapter for each chapter
-// of its spine. With the whole document (Options.Parts unset), script and
+// of its spine; csv and tsv are one part of kind sheet, named by the
+// file, whose rows are table blocks. With the whole document (Options.Parts unset), script and
 // style text, hidden form values and an EPUB's images no chapter shows
 // follow in a part of kind stored.
 //
@@ -257,6 +277,9 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	if !known {
 		return nil, fmt.Errorf("gofasthtml: format %q: %w", format, gofastcore.ErrUnsupported)
 	}
+	if (format == "csv" || format == "tsv") && e.Delimiter != 0 && !usableDelimiter(e.Delimiter) {
+		return nil, fmt.Errorf("gofasthtml: delimiter %q: %w", e.Delimiter, gofastcore.ErrUnsupported)
+	}
 	if format != "epub" && (!opts.Parts.Contains(1) || opts.Parts.Last != 0 && opts.Parts.First > opts.Parts.Last) {
 		return nil, fmt.Errorf("gofasthtml: a document has one part: %w", gofastcore.ErrNoPartsSelected)
 	}
@@ -270,6 +293,9 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	doc.Source = gofastcore.Source{Format: format, Name: opts.Name, MIME: mime, Size: size}
 	if format == "epub" {
 		return e.epub(ctx, doc, src, opts, text, decode)
+	}
+	if format == "csv" || format == "tsv" {
+		return e.csv(ctx, doc, src, format, opts, text, decode)
 	}
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}
