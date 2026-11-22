@@ -82,9 +82,9 @@ A Jupyter notebook (`ipynb`, MIME `application/x-ipynb+json`), format version 4 
 
 JSON (`json`, MIME `application/json`: `.json`, and `.jsonl`, `.ndjson`, `.geojson`) and YAML (`yaml`, MIME `application/yaml`: `.yaml`, `.yml`) are read as text, nothing parsed: data is text here as a person reading the file sees it. They are decoded as plain text is, and are one part of kind `body` of `code` blocks with `Attrs["language"]` `json` or `yaml`.
 
-- **Text as written.** Lines keep their indentation and white space (in YAML it is structure). Control characters other than tab are dropped and line ends are `\n`, as the text conventions have it. Leading and trailing blank lines of a block are left out.
-- **Blocks.** A YAML file of several documents has a block for each, from the `---` line that begins it. A long file or document is split at line ends into pieces of at most 1,000 lines and about 256 KiB, the later pieces `Continued`; a line longer than a piece is cut at a character boundary. Each block has `Loc.Offset` and `Loc.Length` in the file.
-- **Bounds.** The text budget counts each block; where it runs out the body is cut off, with the number of lines not read. An empty file, or one of white space only, has `part.no_text`.
+- **Text as written.** Lines keep their indentation and white space (in YAML it is structure), and ligatures, as code does. Control characters other than tab are dropped, and line ends (LF, CR LF or a lone CR) are `\n`.
+- **Blocks.** A YAML file of several documents has a block for each: a document starts at a `---` line (`---` then the line end, a space or a tab), and after a `...` line at the next line with text, its `%YAML` or `%TAG` directives first. Blank lines at the start and end of a document are left out. A long document is split at line ends into pieces of about 1,000 lines and 256 KiB, the later pieces `Continued`; the pieces joined with line feeds give the document back, blank lines and white space included. A line is never cut: a longer one is a piece of its own. Each block has `Loc.Offset` and `Loc.Length` in the file.
+- **Bounds.** The text budget counts each block; where it runs out the body is cut off, with the number of lines not read (every line after the last block made and the blank lines that end its document). The decode budget cutting the input gives the number of its bytes not read. A file of only blank lines (white space and control characters) has `part.no_text`.
 - Invalid JSON or YAML is read like any other: its text is what it is.
 
 ### EPUB

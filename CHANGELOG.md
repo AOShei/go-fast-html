@@ -9,9 +9,11 @@ named `.json`, `.jsonl`, `.ndjson`, `.geojson`, `.yaml` or `.yml`, which
 - **New formats `json` and `yaml`** (`application/json`,
   `application/yaml`), detected by the name only. One part of kind `body`
   of `code` blocks whose language is the format, their text as written
-  (indentation kept), nothing parsed. A YAML file of several documents
-  has a block for each; a long file is split at line ends into pieces of
-  at most 1,000 lines and about 256 KiB, the later ones `Continued`. Each
+  (indentation and ligatures kept, control characters dropped, line ends
+  LF, CR LF or CR), nothing parsed. A YAML file has a block per document
+  (`---`, and after `...`); a long document is split at line ends into
+  pieces of about 1,000 lines and 256 KiB, the later ones `Continued`,
+  which joined with line feeds give it back. A line is never cut. Each
   block is located by byte offset. Where the text budget runs out, the
   number of lines not read is given.
 - **Command.** `-as json|yaml`; a directory includes these files.

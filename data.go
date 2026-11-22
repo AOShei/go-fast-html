@@ -9,19 +9,27 @@ import (
 	"github.com/AOShei/go-fast-html/internal/charset"
 )
 
-// A JSON or YAML file is read as text: code blocks of its lines as they
-// are written, a long one split into pieces of at most dataBlockLines
-// lines and about dataBlockBytes bytes, the later pieces Continued.
+// A JSON or YAML document longer than this is split at line ends into
+// pieces of about this many lines and bytes, the later pieces Continued.
+// A line is never cut.
 const (
 	dataBlockLines = 1000
 	dataBlockBytes = 256 << 10
 )
 
+// dataLine is one line of a JSON or YAML file.
+type dataLine struct {
+	text       []byte // without its line end, control characters dropped
+	start, end int    // in the decoded text, its line end included
+	blank      bool   // nothing but white space
+}
+
 // dataText reads a JSON or YAML file into one part of kind body: its text,
-// verbatim, in code blocks whose language is the format. A YAML file of
-// several documents has a block (or a run of them) for each, the "---"
-// line that starts a document at its head. Nothing is parsed: data is
-// text here, as a person reading the file sees it.
+// verbatim but for control characters, in code blocks whose language is
+// the format. Nothing is parsed. A YAML file of several documents has a
+// block (or a run of pieces) for each; the blank lines at the start and
+// end of a document are left out, and the pieces of a document joined
+// with line feeds give it back.
 func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src []byte, format string, opts *gofastcore.Options,
 	text *gofastcore.TextBudget, decode *gofastcore.DecodeBudget) (*gofastcore.Document, error) {
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
@@ -38,101 +46,104 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 	}
 	if cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-			"the limit on decoded bytes was reached; the rest of the input was not read")
+			fmt.Sprintf("the limit on decoded bytes was reached; the rest of the input was not read (%d bytes)",
+				int64(len(src))-m.Source(len(decoded))))
 	}
 
 	var (
-		buf       []byte // the block being made
-		lines     int    // its lines
-		start     = -1   // its first byte in decoded
-		end       int    // past its last line with text, in decoded
-		keep      int    // the length of buf to its last line with text
-		continued bool   // it continues the block before it
-		spent     bool   // the text budget ran out
-		left      int    // lines not read then
+		pending   []dataLine // the lines of the block being made
+		size      int        // their bytes
+		continued bool       // the block continues the one before it
+		emitted   int        // past the last line of the blocks made, in decoded
+		spent     bool       // the text budget ran out
 	)
-	flush := func(next bool) bool {
-		body := buf[:keep]
-		if len(body) > 0 {
-			if !text.Take(gofastcore.BlockCost + len(body)) {
-				return false
-			}
-			off := m.Source(start)
-			part.Blocks = append(part.Blocks, gofastcore.Block{Kind: gofastcore.KindCode, Text: string(body),
-				Continued: continued, Attrs: map[string]string{gofastcore.AttrLanguage: format},
-				Loc: gofastcore.Location{Offset: off, Length: m.Source(end) - off}})
-			continued = next
-		}
-		buf, lines, start, keep = buf[:0], 0, -1, 0
-		return true
-	}
-	// add adds a piece of a line, at offset off of decoded, to the block,
-	// beginning another first when the block is full.
-	add := func(piece []byte, off int) bool {
-		if len(buf) > 0 && (len(buf)+len(piece) > dataBlockBytes || lines >= dataBlockLines) {
-			if !flush(true) {
-				return false
+	// flush makes a block of the pending lines, but for blank lines at
+	// its end when the document ends there (last).
+	flush := func(last bool) bool {
+		n := len(pending)
+		if last {
+			for n > 0 && pending[n-1].blank {
+				n--
 			}
 		}
-		blank := len(bytes.TrimSpace(piece)) == 0
-		if start < 0 && blank {
-			return true // blank lines before a block are not in it
+		if n == 0 {
+			pending, size = pending[:0], 0
+			return true
 		}
-		if start < 0 {
-			start = off
+		lines := pending[:n]
+		var b []byte
+		for i, l := range lines {
+			if i > 0 {
+				b = append(b, '\n')
+			}
+			b = append(b, l.text...)
 		}
-		nl := bytes.HasSuffix(piece, []byte("\n"))
-		buf = cleanAppend(buf, bytes.TrimSuffix(bytes.TrimSuffix(piece, []byte("\n")), []byte("\r")))
-		if !blank {
-			keep, end = len(buf), off+len(piece)
+		if !text.Take(gofastcore.BlockCost + len(b)) {
+			return false
 		}
-		if nl {
-			buf = append(buf, '\n')
-		}
-		lines++
+		first, end := lines[0].start, lines[n-1].end
+		off := m.Source(first)
+		part.Blocks = append(part.Blocks, gofastcore.Block{Kind: gofastcore.KindCode, Text: string(b),
+			Continued: continued, Attrs: map[string]string{gofastcore.AttrLanguage: format},
+			Loc: gofastcore.Location{Offset: off, Length: m.Source(end) - off}})
+		emitted = pending[len(pending)-1].end
+		continued = !last
+		pending, size = pending[:0], 0
 		return true
 	}
-	for pos, n := 0, 0; pos < len(decoded) && !spent; n++ {
+	// endDocument ends a YAML document before the line being read.
+	endDocument := func() bool {
+		ok := flush(true)
+		continued = false
+		return ok
+	}
+	ended := false // a YAML "..." line ended the document
+	for pos, n := 0, 0; pos < len(decoded); n++ {
 		if n&1023 == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 		}
-		next := len(decoded)
-		if i := bytes.IndexByte(decoded[pos:], '\n'); i >= 0 {
-			next = pos + i + 1
+		l, next := dataNextLine(decoded, pos)
+		pos = next
+		if format == "yaml" {
+			// A document starts at "---", and after "..." at the next
+			// line with text (its directives, %YAML and %TAG, first).
+			if yamlMarker(l.text, "---") || ended && !l.blank {
+				if !endDocument() {
+					spent = true
+					break
+				}
+			}
+			if !l.blank {
+				ended = false
+			}
 		}
-		line := decoded[pos:next]
-		// A YAML document begins at a line "---" (or "--- " and more).
-		if format == "yaml" && start >= 0 && (bytes.Equal(bytes.TrimRight(line, "\r\n"), []byte("---")) || bytes.HasPrefix(line, []byte("--- "))) {
+		if len(pending) == 0 && l.blank {
+			emitted = l.end // blank lines before a block are in none
+			continue
+		}
+		// A long document is split at a line end, after a line with
+		// text, so that no piece is only blank lines.
+		if len(pending) > 0 && !pending[len(pending)-1].blank &&
+			(len(pending) >= dataBlockLines || size+len(l.text) > dataBlockBytes) {
 			if !flush(false) {
 				spent = true
+				break
 			}
-			continued = false
 		}
-		// A line too long for one piece is cut at a character boundary.
-		for off := pos; off < next && !spent; {
-			k := min(next-off, dataBlockBytes)
-			for k < next-off && k > 0 && decoded[off+k]&0xC0 == 0x80 {
-				k--
-			}
-			if !add(decoded[off:off+k], off) {
-				spent = true
-			}
-			off += k
+		pending = append(pending, l)
+		size += len(l.text) + 1
+		if format == "yaml" && yamlMarker(l.text, "...") {
+			ended = true
 		}
-		if spent {
-			left = linesFrom(decoded, start, pos)
-			break
-		}
-		pos = next
 	}
-	if !spent && !flush(false) {
-		spent, left = true, linesFrom(decoded, start, len(decoded))
+	if !spent && !flush(true) {
+		spent = true
 	}
 	if spent {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-			textCutMessage(part.Kind)+" ("+count(left, "line", "lines")+" not read)")
+			textCutMessage(part.Kind)+" ("+count(dataLinesFrom(decoded, emitted), "line", "lines")+" not read)")
 	}
 	if len(part.Blocks) == 0 && !cut && !spent {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")
@@ -143,20 +154,66 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 	return doc, nil
 }
 
-// linesFrom counts the lines not read when the budget ran out: from the
-// start of the block not made (start, or pos when none was begun) to the
-// end. A line cut into pieces counts once.
-func linesFrom(decoded []byte, start, pos int) int {
-	from := pos
-	if start >= 0 {
-		from = start
+// dataNextLine reads the line at pos: it ends at LF, CR LF or a lone CR.
+// It returns the line and where the next begins.
+func dataNextLine(b []byte, pos int) (dataLine, int) {
+	i := pos
+	for i < len(b) && b[i] != '\n' && b[i] != '\r' {
+		i++
 	}
-	for from > 0 && decoded[from-1] != '\n' {
-		from-- // the start of the line the piece is in
+	next := i
+	switch {
+	case i+1 < len(b) && b[i] == '\r' && b[i+1] == '\n':
+		next = i + 2
+	case i < len(b):
+		next = i + 1
 	}
-	rest := decoded[from:]
-	n := bytes.Count(rest, []byte("\n"))
-	if len(rest) > 0 && rest[len(rest)-1] != '\n' {
+	text := dropControls(nil, b[pos:i])
+	return dataLine{text: text, start: pos, end: next, blank: len(bytes.TrimSpace(text)) == 0}, next
+}
+
+// yamlMarker reports whether a line is a YAML document marker ("---" or
+// "..."): the three characters, then the line end, a space or a tab.
+func yamlMarker(line []byte, marker string) bool {
+	if !bytes.HasPrefix(line, []byte(marker)) {
+		return false
+	}
+	return len(line) == 3 || line[3] == ' ' || line[3] == '\t'
+}
+
+// dropControls appends src to dst without its control characters other
+// than tab: verbatim otherwise, as code is. src is valid UTF-8.
+func dropControls(dst, src []byte) []byte {
+	from := 0
+	for i := 0; i < len(src); {
+		c := src[i]
+		n := 0
+		switch {
+		case c < 0x20 && c != '\t', c == 0x7F:
+			n = 1
+		case c == 0xC2 && i+1 < len(src) && src[i+1] >= 0x80 && src[i+1] <= 0x9F: // C1 controls
+			n = 2
+		}
+		if n == 0 {
+			i++
+			continue
+		}
+		dst = append(dst, src[from:i]...)
+		i += n
+		from = i
+	}
+	if from == 0 && dst == nil {
+		return src // nothing dropped: the line as it is
+	}
+	return append(dst, src[from:]...)
+}
+
+// dataLinesFrom counts the lines of b from pos to the end: every line,
+// blank or not, a last one without a line end included.
+func dataLinesFrom(b []byte, pos int) int {
+	n := 0
+	for pos < len(b) {
+		_, pos = dataNextLine(b, pos)
 		n++
 	}
 	return n

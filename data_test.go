@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
 )
@@ -103,18 +104,11 @@ func TestDataSplit(t *testing.T) {
 	if joined != b.String() || strings.Count(blocks[0].Text, "\n") != dataBlockLines-1 {
 		t.Error("pieces do not join to the input")
 	}
-	// One line longer than a piece is cut at a character boundary.
-	long := strings.Repeat("é", dataBlockBytes)
-	doc = dataDoc(t, "l.json", "\""+long+"\"", nil)
-	var all string
-	for i, bl := range doc.Parts[0].Blocks {
-		if bl.Continued != (i > 0) {
-			t.Errorf("block %d continued %v", i, bl.Continued)
-		}
-		all += bl.Text
-	}
-	if all != "\""+long+"\"" || len(doc.Parts[0].Blocks) != 3 {
-		t.Errorf("long line: %d blocks, %d bytes", len(doc.Parts[0].Blocks), len(all))
+	// A line is never cut: one longer than a piece is a block of its own.
+	long := strings.Repeat("\u00e9", dataBlockBytes)
+	doc = dataDoc(t, "l.json", "[\n\""+long+"\"\n]", nil)
+	if bl := doc.Parts[0].Blocks; len(bl) != 3 || bl[0].Text != "[" || bl[1].Text != "\""+long+"\"" || bl[2].Text != "]" || !bl[1].Continued || !bl[2].Continued {
+		t.Errorf("long line: %d blocks", len(bl))
 	}
 }
 
@@ -197,11 +191,124 @@ func FuzzData(f *testing.F) {
 			if err := doc.Validate(); err != nil {
 				t.Fatalf("Validate: %v", err)
 			}
+			var texts []string
 			for i, bl := range doc.Parts[0].Blocks {
 				if bl.Kind != gofastcore.KindCode || bl.Attrs[gofastcore.AttrLanguage] != format {
 					t.Fatalf("block %d: %v %v", i, bl.Kind, bl.Attrs)
 				}
+				texts = append(texts, bl.Text)
+			}
+			// JSON in UTF-8, read whole: the blocks joined with line feeds
+			// are the input's lines, control characters dropped, blank
+			// lines at the start and end left out.
+			if format == "json" && !small && utf8.Valid(b) && !bytes.HasPrefix(b, []byte("\xEF\xBB\xBF")) {
+				var lines []string
+				for pos := 0; pos < len(b); {
+					l, next := dataNextLine(b, pos)
+					lines = append(lines, string(l.text))
+					pos = next
+				}
+				for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+					lines = lines[1:]
+				}
+				for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+					lines = lines[:len(lines)-1]
+				}
+				if got, want := strings.Join(texts, "\n"), strings.Join(lines, "\n"); got != want {
+					t.Fatalf("joined blocks:\n%q\nwant\n%q", got, want)
+				}
 			}
 		}
 	})
+}
+
+// TestDataReview covers the findings of the review of the first version.
+func TestDataReview(t *testing.T) {
+	texts := func(doc *gofastcore.Document) []string {
+		var out []string
+		for _, b := range doc.Parts[0].Blocks {
+			s := b.Text
+			if b.Continued {
+				s = "+" + s
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	check := func(name, src string, want ...string) {
+		t.Helper()
+		if got := texts(dataDoc(t, name, src, nil)); strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("%q:\n got %q\nwant %q", src, got, want)
+		}
+	}
+	// A lone CR ends a line.
+	check("a.yaml", "a: 1\rb: 2\r---\rc: 3\r", "a: 1\nb: 2", "---\nc: 3")
+	// Document markers: tab after ---; after ..., the next line starts a
+	// document, its directives first.
+	check("b.yaml", "a: 1\n---\tb: 2\n", "a: 1", "---\tb: 2")
+	check("c.yaml", "a: 1\n...\nb: 2\n", "a: 1\n...", "b: 2")
+	check("d.yaml", "a: 1\n...\n%YAML 1.2\n---\nb: 2\n", "a: 1\n...", "%YAML 1.2", "---\nb: 2")
+	// Lines of control characters only are blank.
+	check("e.json", "\x01\na: 1\n\x01", "a: 1")
+	doc := dataDoc(t, "f.json", "\x01\n\x00\n", nil)
+	if len(doc.Parts[0].Blocks) != 0 || len(csvWarnings(doc, gofastcore.WarnPartNoText)) != 1 {
+		t.Errorf("controls only: %+v", doc.Parts[0])
+	}
+	// Code is verbatim: ligatures are kept.
+	check("g.json", "{\"k\": \"\ufb01le\"}", "{\"k\": \"\ufb01le\"}")
+
+	// Pieces joined with line feeds give back the document: blank lines
+	// and white space at a split are kept.
+	var b strings.Builder
+	b.WriteString("text: |\n")
+	for range 998 {
+		b.WriteString("  x\n")
+	}
+	b.WriteString("\n\n  y\n")
+	doc = dataDoc(t, "h.yaml", b.String(), nil)
+	var joined []string
+	for _, bl := range doc.Parts[0].Blocks {
+		joined = append(joined, bl.Text)
+	}
+	if strings.Join(joined, "\n")+"\n" != b.String() {
+		t.Errorf("blank lines at a split lost: %d blocks", len(joined))
+	}
+	ws := "a\n" + strings.Repeat(" ", dataBlockBytes+100) + "b\n"
+	doc = dataDoc(t, "i.json", ws, nil)
+	joined = joined[:0]
+	for _, bl := range doc.Parts[0].Blocks {
+		joined = append(joined, bl.Text)
+	}
+	if strings.Join(joined, "\n")+"\n" != ws {
+		t.Errorf("white space at a split lost: %d blocks", len(joined))
+	}
+
+	// A document after a split is not Continued.
+	b.Reset()
+	for range 1000 {
+		b.WriteString("a: 1\n")
+	}
+	b.WriteString("\n---\nb: 2\n")
+	doc = dataDoc(t, "j.yaml", b.String(), nil)
+	last := doc.Parts[0].Blocks[len(doc.Parts[0].Blocks)-1]
+	if last.Text != "---\nb: 2" || last.Continued {
+		t.Errorf("document after a split: %q continued %v", last.Text, last.Continued)
+	}
+
+	// Lines not read: every line after the last block made.
+	for src, want := range map[string]string{
+		"a: 1\n---\nb: 2\n\n\n\n\n": "(6 lines not read)",
+		// The blank lines that end a document made are its own.
+		"a: 1\n\n\n\n---\nb: 2\n": "(2 lines not read)",
+	} {
+		doc := dataDoc(t, "k.yaml", src, &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 140}})
+		if w := csvWarnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.HasSuffix(w[0], want) {
+			t.Errorf("%q: %q", src, w)
+		}
+	}
+	// The decode cut gives the bytes not read.
+	doc = dataDoc(t, "l.json", strings.Repeat("x\n", 1000), &gofastcore.Options{Limits: gofastcore.Limits{MaxDecodedBytes: 100}})
+	if w := csvWarnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.HasSuffix(w[0], "(1900 bytes)") {
+		t.Errorf("decode: %q", w)
+	}
 }
