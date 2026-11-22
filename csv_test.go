@@ -77,7 +77,7 @@ func TestCSVDetect(t *testing.T) {
 	if doc.Source.MIME != "text/tab-separated-values" || !reflect.DeepEqual(csvRows(t, doc), [][]string{{"a", "b"}}) {
 		t.Errorf("tsv: %+v %q", doc.Source, csvRows(t, doc))
 	}
-	if !reflect.DeepEqual((&Extractor{}).Formats(), []string{"html", "md", "txt", "epub", "csv", "tsv"}) {
+	if !reflect.DeepEqual((&Extractor{}).Formats(), []string{"html", "md", "txt", "epub", "csv", "tsv", "ipynb"}) {
 		t.Error((&Extractor{}).Formats())
 	}
 }
