@@ -206,7 +206,7 @@ func (w *walker) emitTable(n *dom.Node, rows []tableRow, cells []placed, width i
 		}
 	}
 	w.res.Blocks = append(w.res.Blocks, gofastcore.Block{Kind: gofastcore.KindTable, Table: t, Display: any,
-		Loc: w.loc(n.Start, n.End, anchorOf(n))})
+		Loc: w.loc(n.Start, n.End, w.anchorOf(n))})
 }
 
 // headerRow reports a row of a thead, or one whose cells are all th.

@@ -47,8 +47,21 @@ type Result struct {
 	// decoded, their bytes passing the decode budget: they have no ID
 	// and no data.
 	ImageBudget int
-	// MetaCut reports a metadata value cut to MaxMeta.
-	MetaCut bool
+	// MetaCut counts the metadata values longer than MaxMeta, cut there;
+	// TitleCut reports that the title was one of them.
+	MetaCut  int
+	TitleCut bool
+	// AuthorsLeftOut and KeywordsLeftOut count the author and keyword
+	// declarations past MaxMetaList, left out.
+	AuthorsLeftOut, KeywordsLeftOut int
+	// LangLeftOut reports an html lang longer than MaxLang, left out.
+	LangLeftOut bool
+	// AnchorsLeftOut counts the elements whose id (or an a's name) is
+	// longer than MaxAnchor, not used as Loc.Anchor.
+	AnchorsLeftOut int
+	// LanguagesLeftOut counts the code blocks whose language is longer
+	// than MaxLang, left out.
+	LanguagesLeftOut int
 	// Images counts img elements, whether or not blocks were made.
 	Images int
 	// Stylesheets counts style elements and linked stylesheets, whose
@@ -69,6 +82,13 @@ type Result struct {
 
 // MaxMeta bounds the length of one metadata value.
 const MaxMeta = 64 << 10
+
+// MaxMetaList bounds the author and the keyword declarations read.
+const MaxMetaList = 256
+
+// MaxLang bounds the length of the html element's lang and of a code
+// block's language; a longer one is left out.
+const MaxLang = 64
 
 // MaxAnchor bounds the length of an id used as Loc.Anchor; a longer id
 // is not used.
@@ -110,6 +130,9 @@ type walker struct {
 	// of the inner document's root.
 	frame      *dom.Node
 	frameDepth int
+	// longIDs holds the elements whose id was too long to be an anchor,
+	// to count each once.
+	longIDs map[*dom.Node]bool
 }
 
 // Walk produces the blocks of the tree under root.
@@ -183,8 +206,10 @@ func (w *walker) element(n *dom.Node) {
 		// A srcdoc document's language, title and meta elements are its
 		// own, not the page's metadata.
 		if lang, ok := n.Attr("lang"); ok && w.res.Meta.Language == "" && w.frame == nil {
-			if l := cleanRef(lang); len(l) <= 64 {
+			if l := cleanRef(lang); len(l) <= MaxLang {
 				w.res.Meta.Language = l
+			} else {
+				w.res.LangLeftOut = true
 			}
 		}
 	case "head":
@@ -227,7 +252,7 @@ func (w *walker) element(n *dom.Node) {
 		w.hardFlush()
 		if w.cell == 0 {
 			w.emit(gofastcore.Block{Kind: gofastcore.KindThematicBreak, Display: n.Display,
-				Loc: w.loc(n.Start, n.End, anchorOf(n))})
+				Loc: w.loc(n.Start, n.End, w.anchorOf(n))})
 		}
 		return
 	case "img":
@@ -258,7 +283,11 @@ func (w *walker) element(n *dom.Node) {
 			w.inline(n, 0)
 			return
 		}
-		w.code(n, codeLanguage(n))
+		lang, long := codeLanguage(n)
+		if long {
+			w.res.LanguagesLeftOut++
+		}
+		w.code(n, lang)
 		return
 	case "table":
 		w.table(n)
@@ -337,7 +366,7 @@ func (w *walker) own(n *dom.Node) {
 	}
 	w.owner = n
 	w.buf.cover(n.Start, n.End)
-	if id := anchorOf(n); id != "" {
+	if id := w.anchorOf(n); id != "" {
 		w.buf.anchor = id
 	}
 }
@@ -346,7 +375,7 @@ func (w *walker) own(n *dom.Node) {
 func (w *walker) inline(n *dom.Node, style gofastcore.Style) {
 	b := w.buf
 	if b.anchor == "" {
-		b.anchor = anchorOf(n)
+		b.anchor = w.anchorOf(n)
 	}
 	href := ""
 	if n.NS == dom.HTML && n.Name == "a" {
@@ -536,7 +565,7 @@ func (w *walker) loc(start, end int, anchor string) gofastcore.Location {
 	if w.frame != nil {
 		// Inside a srcdoc document: the iframe in the page, whose
 		// offsets its nodes were given.
-		anchor = anchorOf(w.frame)
+		anchor = w.anchorOf(w.frame)
 	}
 	if start >= 0 && end > start && w.cfg.Source != nil {
 		l.Offset = w.cfg.Source(start)
@@ -627,7 +656,7 @@ func (w *walker) code(n *dom.Node, lang string) {
 		return
 	}
 	blk := gofastcore.Block{Kind: gofastcore.KindCode, Text: text, Display: display, Spans: spans,
-		Loc: w.loc(n.Start, n.End, anchorOf(n))}
+		Loc: w.loc(n.Start, n.End, w.anchorOf(n))}
 	if lang != "" {
 		blk.Attrs = map[string]string{gofastcore.AttrLanguage: lang}
 	}
@@ -655,7 +684,7 @@ func (w *walker) storedCode(n *dom.Node, lang, stored string) {
 		return
 	}
 	blk := gofastcore.Block{Kind: gofastcore.KindCode, Text: text,
-		Loc: w.loc(n.Start, n.End, anchorOf(n)), Attrs: map[string]string{gofastcore.AttrStored: stored}}
+		Loc: w.loc(n.Start, n.End, w.anchorOf(n)), Attrs: map[string]string{gofastcore.AttrStored: stored}}
 	if lang != "" {
 		blk.Attrs[gofastcore.AttrLanguage] = lang
 	}
@@ -780,7 +809,7 @@ func (w *walker) choices(n *dom.Node) {
 	}
 	b := gofastcore.Block{Kind: gofastcore.KindNote, Text: strings.Join(lines, "\n"), Display: n.Display,
 		Attrs: map[string]string{gofastcore.AttrNoteType: gofastcore.NoteChoices},
-		Loc:   w.loc(n.Start, n.End, anchorOf(n))}
+		Loc:   w.loc(n.Start, n.End, w.anchorOf(n))}
 	if name, _ := n.Attr("name"); cleanRef(name) != "" {
 		b.Attrs[gofastcore.AttrField] = cleanRef(name)
 	}
@@ -834,7 +863,7 @@ func (w *walker) input(n *dom.Node) {
 			attrs[gofastcore.AttrField] = cleanRef(name)
 		}
 		w.store(gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Attrs: attrs,
-			Loc: w.loc(n.Start, n.End, anchorOf(n))})
+			Loc: w.loc(n.Start, n.End, w.anchorOf(n))})
 		return
 	}
 	w.field(n, v, dom.Normal)
@@ -850,7 +879,7 @@ func (w *walker) field(n *dom.Node, value string, ws dom.WS) {
 		return
 	}
 	blk := gofastcore.Block{Kind: gofastcore.KindParagraph, Text: text, Display: display, Spans: spans,
-		Loc: w.loc(n.Start, n.End, anchorOf(n))}
+		Loc: w.loc(n.Start, n.End, w.anchorOf(n))}
 	if name, _ := n.Attr("name"); cleanRef(name) != "" {
 		blk.Attrs = map[string]string{gofastcore.AttrField: cleanRef(name)}
 	}
