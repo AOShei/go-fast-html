@@ -39,17 +39,7 @@ import (
 	"github.com/AOShei/go-fast-html"
 )
 
-// defaultGCPercent is the garbage collector's target the command runs
-// with when GOGC is not set: collecting half as often as Go's default
-// (100) reads a batch about 15% faster with 24 workers, for memory still
-// below that of the C parsers' Python bindings (bench/README.md). GOGC in
-// the environment wins.
-const defaultGCPercent = 200
-
 func main() {
-	if os.Getenv("GOGC") == "" {
-		debug.SetGCPercent(defaultGCPercent)
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))

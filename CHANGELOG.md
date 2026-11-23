@@ -46,9 +46,10 @@ faster with one worker and 2 times with 24 on the 9,835 pages of
   `<script>` or `<style>` of one text with nothing to drop is copied once;
   a `title`, `aria-label` or metadata value with nothing to collapse or
   drop is not rebuilt.
-- **The command runs with `GOGC=200`** unless `GOGC` is set: about 15%
-  faster with 24 workers (0.70 s), for a peak of about 730 MB, near that of
-  the C parsers' Python bindings. `GOGC=100` uses the least memory.
+- **`GOGC` documented** (README): Go's default, 100, which the command
+  and the library keep, uses the least memory; `GOGC=200` reads the batch
+  with 24 workers in 0.70 s for a peak of about 730 MB, `GOGC=400` in
+  0.63 s for about 1 GB. The choice of memory for speed is the user's.
 
 - **The tokenizer copies nothing it need not.** Text, attribute values and
   names with no character reference are slices of the page, not copies,
