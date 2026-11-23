@@ -38,7 +38,7 @@ named `.json`, `.jsonl`, `.ndjson`, `.geojson`, `.yaml` or `.yml`, which
   in the earlier blocks had none, and the span could start in the middle
   of a character, which `Validate` rejects. Each block now has the
   element's span over its own part. On four pages of the public corpus,
-  191 links that were missing are given; no span moved or went. Output
+  193 links that were missing are given; no span moved or went. Output
   without spans is unchanged.
 
 ## v0.2.0 (2026-11-22)
