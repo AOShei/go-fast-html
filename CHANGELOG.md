@@ -1,10 +1,17 @@
 # Changelog
 
-## Unreleased
+## v0.3.0 (2026-11-23)
 
-JSON and YAML as text. Output for the other formats is unchanged; a file
-named `.json`, `.jsonl`, `.ndjson`, `.geojson`, `.yaml` or `.yml`, which
-`Detect` read as plain text, is now read in its format.
+JSON and YAML as text; text that declares no encoding read in the one
+its bytes are certainly in, or refused; the control characters removed
+reported; and the links of inline elements that hold blocks given.
+Requires go-fast-core v0.1.2.
+
+For a file that is UTF-8 or declares its encoding, the output differs
+from v0.2.0 only in spans (below) and in the new warning
+`text.control_characters_removed`. A file named `.json`, `.jsonl`,
+`.ndjson`, `.geojson`, `.yaml` or `.yml`, which `Detect` read as plain
+text, is now read in its format.
 
 - **New formats `json` and `yaml`** (`application/json`,
   `application/yaml`), detected by the name only. One part of kind `body`
