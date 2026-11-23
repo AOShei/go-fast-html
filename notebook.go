@@ -278,7 +278,7 @@ func metaText(s string, t *tally) string {
 		s = s[:n]
 		t.meta.values++
 	}
-	return strings.TrimSpace(string(cleanAppend(nil, []byte(strings.ToValidUTF8(s, "\uFFFD")))))
+	return strings.TrimSpace(string(cleanAppend(nil, []byte(strings.ToValidUTF8(s, "\uFFFD")), &t.controls)))
 }
 
 // metadata reads the notebook's metadata: its title and authors, and the
@@ -733,6 +733,7 @@ func (r *nbReader) merge(w walked) {
 	a.ImageBudget += s.ImageBudget
 	a.AnchorsLeftOut += s.AnchorsLeftOut
 	a.LanguagesLeftOut += s.LanguagesLeftOut
+	a.Controls += s.Controls
 	a.Images += s.Images
 	a.Stylesheets += s.Stylesheets
 	a.Stored = append(a.Stored, s.Stored...)

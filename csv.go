@@ -101,6 +101,9 @@ func (e *Extractor) csv(ctx context.Context, doc *gofastcore.Document, src []byt
 	if err != nil {
 		return nil, err
 	}
+	if res.controls > 0 {
+		part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(res.controls, "the fields"))
+	}
 	if res.repaired > 0 {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnInputRepaired,
 			count(res.repaired, "row has", "rows have")+" a quote outside the rules of RFC 4180 (a quote inside an unquoted field, text after a closing quote, or a quoted field not closed before the end of the input); the quote inside a field was kept as text, the text after a closing quote was joined to the field, and an unclosed field runs to the end of the input")
@@ -137,7 +140,7 @@ func csvPartName(name string) string {
 	if base == "." || base == string(filepath.Separator) {
 		return ""
 	}
-	return string(cleanAppend(nil, []byte(base)))
+	return string(cleanAppend(nil, []byte(base), nil)) // a name: not counted
 }
 
 // sepLine reads Excel's declaration of the delimiter, a first line
@@ -208,6 +211,7 @@ func sniffDelimiter(b []byte, noQuotes bool) rune {
 // csvResult is what reading the rows found.
 type csvResult struct {
 	repaired  int   // rows with a quote outside the rules
+	controls  int   // control characters dropped from the fields output
 	colsCut   int   // fields past MaxCSVColumns
 	fieldsCut int   // fields longer than MaxCSVField
 	bytesCut  int64 // what those fields lost
@@ -277,9 +281,9 @@ func readCSV(ctx context.Context, text []byte, delim rune, header, noQuotes bool
 			first = i
 		}
 		clean, ends = clean[:0], ends[:0]
-		prev := 0
+		prev, rowControls := 0, 0
 		for _, e := range r.ends {
-			clean = cleanAppend(clean, r.buf[prev:e])
+			clean = cleanAppend(clean, r.buf[prev:e], &rowControls)
 			ends = append(ends, len(clean))
 			prev = e
 		}
@@ -291,6 +295,7 @@ func readCSV(ctx context.Context, text []byte, delim rune, header, noQuotes bool
 		if r.repaired {
 			res.repaired++
 		}
+		res.controls += rowControls
 		res.colsCut += r.colsCut
 		res.fieldsCut += r.fieldsCut
 		res.bytesCut += r.bytesCut
@@ -336,8 +341,9 @@ func a1Cell(row, col int) string {
 // cleanAppend appends field text to dst following the text conventions:
 // control characters other than tab and line feed are dropped, and
 // ligatures written as their letters. Nothing else is changed: white
-// space is kept as written. src is valid UTF-8.
-func cleanAppend(dst, src []byte) []byte {
+// space is kept as written. src is valid UTF-8. The control characters
+// dropped are counted in *controls when it is not nil.
+func cleanAppend(dst, src []byte, controls *int) []byte {
 	from := 0
 	for i := 0; i < len(src); {
 		c := src[i]
@@ -346,8 +352,14 @@ func cleanAppend(dst, src []byte) []byte {
 		switch {
 		case c < 0x20 && c != '\t' && c != '\n', c == 0x7F:
 			n = 1
+			if controls != nil && c != '\r' && c != '\f' {
+				*controls++
+			}
 		case c == 0xC2 && i+1 < len(src) && src[i+1] >= 0x80 && src[i+1] <= 0x9F: // C1 controls
 			n = 2
+			if controls != nil {
+				*controls++
+			}
 		case c == 0xEF && i+2 < len(src) && src[i+1] == 0xAC && src[i+2] <= 0x86:
 			r, size := utf8.DecodeRune(src[i:])
 			if lig = gofastcore.Ligature(r); lig != "" {

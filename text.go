@@ -18,16 +18,29 @@ import (
 func plainText(ctx context.Context, src []byte, source func(int) int64, budget *gofastcore.TextBudget, part *gofastcore.Part) bool {
 	var buf []byte
 	start, end := -1, 0
+	// Control characters dropped: of the paragraph being read, and of
+	// those output and blank lines read; a paragraph the budget leaves
+	// out is not read, and its are not counted.
+	pending, controls := 0, 0
+	defer func() {
+		if controls > 0 {
+			part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(controls, "the text"))
+		}
+	}()
 	flush := func() bool {
 		text := trimSpace(buf)
 		buf = buf[:0]
 		if len(text) == 0 {
 			start = -1
+			controls += pending
+			pending = 0
 			return true
 		}
 		if !budget.Take(gofastcore.BlockCost + len(text)) {
 			return false
 		}
+		controls += pending
+		pending = 0
 		off := source(start)
 		part.Blocks = append(part.Blocks, gofastcore.Block{Kind: gofastcore.KindParagraph, Text: string(text),
 			Loc: gofastcore.Location{Offset: off, Length: source(end) - off}})
@@ -57,6 +70,7 @@ func plainText(ctx context.Context, src []byte, source func(int) int64, budget *
 			if !flush() {
 				return true
 			}
+			controls += lineControls(line)
 		} else {
 			if start < 0 {
 				start = pos
@@ -64,6 +78,7 @@ func plainText(ctx context.Context, src []byte, source func(int) int64, budget *
 				buf = append(buf, '\n')
 			}
 			buf = appendLine(buf, line)
+			pending += lineControls(line)
 			end = e
 		}
 		if ff && !flush() {
@@ -83,6 +98,20 @@ func blankLine(b []byte) bool {
 		b = b[n:]
 	}
 	return true
+}
+
+// lineControls counts the control characters appendLine drops from a
+// line: all but tab (the line's end is not in it).
+func lineControls(line []byte) int {
+	n := 0
+	for len(line) > 0 {
+		r, size := utf8.DecodeRune(line)
+		if r != '\t' && unicode.IsControl(r) {
+			n++
+		}
+		line = line[size:]
+	}
+	return n
 }
 
 // appendLine appends a line without its trailing white space, dropping

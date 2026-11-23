@@ -1,10 +1,17 @@
 # Changelog
 
-## Unreleased
+## v0.3.0 (2026-11-23)
 
-JSON and YAML as text. Output for the other formats is unchanged; a file
-named `.json`, `.jsonl`, `.ndjson`, `.geojson`, `.yaml` or `.yml`, which
-`Detect` read as plain text, is now read in its format.
+JSON and YAML as text; text that declares no encoding read in the one
+its bytes are certainly in, or refused; the control characters removed
+reported; and the links of inline elements that hold blocks given.
+Requires go-fast-core v0.1.2.
+
+For a file that is UTF-8 or declares its encoding, the output differs
+from v0.2.0 only in spans (below) and in the new warning
+`text.control_characters_removed`. A file named `.json`, `.jsonl`,
+`.ndjson`, `.geojson`, `.yaml` or `.yml`, which `Detect` read as plain
+text, is now read in its format.
 
 - **New formats `json` and `yaml`** (`application/json`,
   `application/yaml`), detected by the name only. One part of kind `body`
@@ -35,8 +42,9 @@ UTF-8 or declares its encoding is not judged, and reads as before.
   the 1,000 most frequent Chinese characters come from the Unicode
   Consortium's Unihan database (`internal/charset/common.go`, see
   `NOTICE`).
-- **`html.charset_detected`** (warning) names the encoding a document was
-  read in when it was recognised from its bytes.
+- **`text.encoding_detected`** (warning; a go-fast-core v0.1.2 code) names
+  the encoding a document was read in when it was recognised from its
+  bytes.
 - **`ErrEncodingUnknown`** (wraps `gofastcore.ErrUnsupported`) for input
   whose encoding is not certain, with a message that says to give it with
   `Extractor.Charset` (command: `-charset`). A chapter of an EPUB is read
@@ -51,6 +59,16 @@ UTF-8 or declares its encoding is not judged, and reads as before.
   garbage and now reads as Russian.
 - The double-byte code pages' tables are found by a switch instead of a
   map, for every character decoded.
+
+### Control characters removed are reported
+
+Control characters with no meaning as text (NUL, ESC, vertical tab, the
+C1 controls) were removed from text silently, as the text conventions
+require. They are now counted, and the part (or, for the metadata and an
+EPUB's table of contents, the document) has `text.control_characters_removed`
+(info, a go-fast-core v0.1.2 code) with the count. Tab, line ends and form
+feed are not counted, nor what is removed from addresses and names. This
+library now requires go-fast-core v0.1.2.
 
 ### Faster
 

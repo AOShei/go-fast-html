@@ -179,8 +179,8 @@ func TestHelpers(t *testing.T) {
 	if cleanRef(" a\x00b\n") != "ab" {
 		t.Error("cleanRef")
 	}
-	if cleanProse(" a\n  b\xEF\xAC\x81 ", true) != "a bfi" {
-		t.Error("cleanProse")
+	if p, n := cleanProse(" a\n  b\xEF\xAC\x81\x00\x1b\f\r\u0085 ", true); p != "a bfi" || n != 3 {
+		t.Errorf("cleanProse: %q, %d controls (NUL, ESC, NEL; not line ends or form feed)", p, n)
 	}
 	d, _ := dom.Parse(context.Background(), []byte(`<pre class="x lang-Go"><code class="language-rust">`), dom.Options{})
 	pre := d.Root.FirstChild

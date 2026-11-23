@@ -58,7 +58,7 @@ func docText(doc *gofastcore.Document) string {
 }
 
 // TestEncodingDetected: text that declares no encoding and is not UTF-8
-// is read in the encoding recognised, with html.charset_detected naming
+// is read in the encoding recognised, with text.encoding_detected naming
 // it, in every format that reads text.
 func TestEncodingDetected(t *testing.T) {
 	for _, c := range []struct {
@@ -83,7 +83,7 @@ func TestEncodingDetected(t *testing.T) {
 		}
 		var msg string
 		for _, w := range doc.Warnings {
-			if w.Code == WarnCharsetDetected {
+			if w.Code == gofastcore.WarnTextEncodingDetected {
 				msg = w.Message
 			}
 		}
@@ -114,7 +114,7 @@ func TestEncodingUnknown(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s with %s: %v", c.file, c.label, err)
 		}
-		if !strings.Contains(docText(doc), c.want) || hasWarning(doc, WarnCharsetDetected) {
+		if !strings.Contains(docText(doc), c.want) || hasWarning(doc, gofastcore.WarnTextEncodingDetected) {
 			t.Errorf("%s with %s: %.80q %v", c.file, c.label, docText(doc), doc.Warnings)
 		}
 	}
@@ -125,7 +125,7 @@ func TestEncodingUnknown(t *testing.T) {
 func TestEncodingDeclaredNotJudged(t *testing.T) {
 	for _, src := range []string{"caf\xC3\xA9 au lait", "<meta charset=windows-1250><p>Pra\xBEsk\xFD hrad", "\xEF\xBB\xBFcaf\xC3\xA9"} {
 		doc, err := extractEnc(t, []byte(src), "a.html", "")
-		if err != nil || hasWarning(doc, WarnCharsetDetected) {
+		if err != nil || hasWarning(doc, gofastcore.WarnTextEncodingDetected) {
 			t.Errorf("%q: %v %v", src, err, doc.Warnings)
 		}
 	}
@@ -146,7 +146,7 @@ func TestEncodingEPUBChapter(t *testing.T) {
 	doc := extractEPUB(t, b, nil)
 	var msg string
 	for _, w := range doc.Warnings {
-		if w.Code == WarnCharsetDetected {
+		if w.Code == gofastcore.WarnTextEncodingDetected {
 			msg = w.Message
 		}
 	}

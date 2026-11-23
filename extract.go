@@ -62,7 +62,7 @@ const (
 // recognised: read as windows-1252 it would not be text. Give the
 // encoding with Extractor.Charset (the command's -charset). It wraps
 // gofastcore.ErrUnsupported. The chapters of an EPUB are read as
-// windows-1252 instead, with WarnCharsetDetected.
+// windows-1252 instead, with gofastcore.WarnTextEncodingDetected.
 var ErrEncodingUnknown = fmt.Errorf("%w: the encoding of the text could not be determined: none is declared, it is not UTF-8, "+
 	"and its bytes are not certainly windows-1252, windows-1251, Shift_JIS, GBK, Big5, EUC-KR or UTF-16; "+
 	"give the encoding with Extractor.Charset (command: -charset)", gofastcore.ErrUnsupported)
@@ -77,13 +77,6 @@ const (
 	// and it was ignored. An EPUB has one such warning for all its
 	// chapters, with their number and the labels.
 	WarnCharsetUnsupported = "html.charset_unsupported"
-	// WarnCharsetDetected: the input declares no encoding (no byte order
-	// mark, no Extractor.Charset, no <meta>) and is not valid UTF-8; it
-	// was read in the encoding its bytes were recognised as, which the
-	// message names. Severity warning: the encoding is not declared,
-	// though only one that is certain is used (see ErrEncodingUnknown).
-	// An EPUB has one such warning for all its chapters.
-	WarnCharsetDetected = "html.charset_detected"
 	// WarnNestingFlattened: elements are nested deeper than the limit.
 	// Below it, elements were placed beside each other instead of inside
 	// each other; their text is all there, and the reasons it is hidden
@@ -373,6 +366,7 @@ type tally struct {
 	charsets         []string           // declared encodings not decoded, each once
 	charsetCount     map[string]int     // how many pages declare each
 	transport        string             // Extractor.Charset, when not decoded
+	controls         int                // control characters dropped from document-level text: metadata, outline
 	detected         []string           // encodings recognised from the bytes, each once
 	detectedCount    map[string]int     // how many pages were read in each
 	stored           []gofastcore.Block // for the stored part
@@ -406,8 +400,11 @@ func (t *tally) sniffed(enc *charset.Result, chapter bool) error {
 
 // finish adds the document's warnings.
 func (t *tally) finish(doc *gofastcore.Document) {
+	if t.controls > 0 {
+		doc.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(t.controls, "the document's metadata and outline"))
+	}
 	if len(t.detected) == 1 && t.detectedCount[t.detected[0]] == 1 {
-		doc.Warn(gofastcore.SeverityWarning, WarnCharsetDetected,
+		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextEncodingDetected,
 			fmt.Sprintf("no encoding is declared and the text is not UTF-8; it was read as %s, recognised from its bytes; "+
 				"if that is wrong, give the encoding with Extractor.Charset (command: -charset)", t.detected[0]))
 	} else if len(t.detected) > 0 {
@@ -417,7 +414,7 @@ func (t *tally) finish(doc *gofastcore.Document) {
 			pages += t.detectedCount[c]
 			list = append(list, fmt.Sprintf("%s in %d", c, t.detectedCount[c]))
 		}
-		doc.Warn(gofastcore.SeverityWarning, WarnCharsetDetected,
+		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextEncodingDetected,
 			fmt.Sprintf("%d chapters declare no encoding and are not UTF-8; they were read as %s, recognised from their bytes",
 				pages, strings.Join(list, ", ")))
 	}
@@ -662,6 +659,9 @@ func (e *Extractor) report(part *gofastcore.Part, w walked, cut bool, pc pageCon
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			count(res.AnchorsLeftOut, "element has an id", "elements have an id")+fmt.Sprintf(" (or an a its name) longer than %d bytes, not used as Loc.Anchor", blocks.MaxAnchor))
 	}
+	if res.Controls > 0 {
+		part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(res.Controls, "the text"))
+	}
 	if res.LanguagesLeftOut > 0 {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			count(res.LanguagesLeftOut, "code block declares a language", "code blocks declare a language")+fmt.Sprintf(" longer than %d bytes, left out", blocks.MaxLang))
@@ -742,4 +742,10 @@ func blocksLabel(s string) string {
 		out = append(out, r)
 	}
 	return string(out)
+}
+
+// controlsMessage says that n control characters were removed from what.
+func controlsMessage(n int, what string) string {
+	return count(n, "control character", "control characters") + " with no meaning as text " +
+		map[bool]string{true: "was", false: "were"}[n == 1] + " removed from " + what
 }

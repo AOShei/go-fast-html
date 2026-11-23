@@ -83,7 +83,8 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 		}
 		return nil, fmt.Errorf("gofasthtml: %v: %w", err, gofastcore.ErrMalformed)
 	}
-	doc.Metadata = epubMetadata(pkg)
+	var metaControls int
+	doc.Metadata, metaControls = epubMetadata(pkg)
 	if pkg.MetaCut > 0 {
 		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			fmt.Sprintf("%s of the package document longer than %d KiB, cut there",
@@ -114,7 +115,7 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 			return unknownEncryption
 		}
 	}
-	t := &tally{}
+	t := &tally{controls: metaControls}
 
 	// The table of contents, counted before the first part.
 	spineIndex := map[string]int{}
@@ -172,7 +173,7 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 	}
 	names := map[int]string{}
 	for _, en := range entries {
-		title := blocks.Clean(en.Title)
+		title, ctl := blocks.Clean(en.Title)
 		if title == "" {
 			continue
 		}
@@ -186,6 +187,7 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 			return doc, nil
 		}
 		n := spineIndex[en.Path]
+		t.controls += ctl
 		doc.Outline = append(doc.Outline, gofastcore.OutlineItem{Title: title, Level: max(en.Level, 1), Part: n})
 		if _, ok := names[n]; !ok && n > 0 {
 			names[n] = title
@@ -685,9 +687,11 @@ func hasProperty(props, p string) bool {
 	return false
 }
 
-// epubMetadata maps the package's Dublin Core metadata.
-func epubMetadata(p *epub.Package) gofastcore.Metadata {
+// epubMetadata maps the package's Dublin Core metadata. It returns the
+// number of control characters dropped from the values used.
+func epubMetadata(p *epub.Package) (gofastcore.Metadata, int) {
 	var m gofastcore.Metadata
+	controls := 0
 	extra := func(k, v string) {
 		if m.Extra == nil {
 			m.Extra = map[string]string{}
@@ -699,21 +703,30 @@ func epubMetadata(p *epub.Package) gofastcore.Metadata {
 	}
 	var ids []string
 	for _, dc := range p.DC {
-		v := blocks.Clean(dc.Value)
+		v, ctl := blocks.Clean(dc.Value)
 		if v == "" {
 			continue
 		}
 		switch dc.Name {
-		case "title":
-			if m.Title == "" {
+		case "title", "language":
+			if dc.Name == "title" && m.Title == "" {
 				m.Title = v
+				controls += ctl
 			}
+			if dc.Name == "language" && m.Language == "" {
+				m.Language = v
+				controls += ctl
+			}
+			continue
+		}
+		switch dc.Name {
+		case "creator", "subject", "description", "publisher", "date", "identifier",
+			"contributor", "rights", "source", "type", "format", "relation", "coverage":
+			controls += ctl // kept
+		}
+		switch dc.Name {
 		case "creator":
 			m.Authors = append(m.Authors, v)
-		case "language":
-			if m.Language == "" {
-				m.Language = v
-			}
 		case "subject":
 			m.Keywords = append(m.Keywords, v)
 		case "description":
@@ -738,16 +751,19 @@ func epubMetadata(p *epub.Package) gofastcore.Metadata {
 	if len(ids) > 0 {
 		extra("identifier", strings.Join(ids, "\n"))
 	}
-	if v := blocks.Clean(p.Meta["dcterms:modified"]); v != "" {
-		m.Modified = parseDate(v)
+	if v, _ := blocks.Clean(p.Meta["dcterms:modified"]); v != "" {
+		m.Modified = parseDate(v) // a time, not text
 	}
-	if v := blocks.Clean(p.Meta["generator"]); v != "" {
+	if v, ctl := blocks.Clean(p.Meta["generator"]); v != "" {
 		m.Application = v
+		controls += ctl
 	}
 	if p.Version != "" {
-		extra("epub_version", blocks.Clean(p.Version))
+		v, ctl := blocks.Clean(p.Version)
+		extra("epub_version", v)
+		controls += ctl
 	}
-	return m
+	return m, controls
 }
 
 func parseDate(s string) time.Time {

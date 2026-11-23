@@ -22,6 +22,7 @@ type dataLine struct {
 	text       []byte // without its line end, control characters dropped
 	start, end int    // in the decoded text, its line end included
 	blank      bool   // nothing but white space
+	controls   int    // control characters dropped
 }
 
 // dataText reads a JSON or YAML file into one part of kind body: its text,
@@ -56,6 +57,7 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 		continued bool       // the block continues the one before it
 		emitted   int        // past the last line of the blocks made, in decoded
 		spent     bool       // the text budget ran out
+		controls  int        // dropped from the lines read: in blocks made, or blank and skipped
 	)
 	// flush makes a block of the pending lines, but for blank lines at
 	// its end when the document ends there (last).
@@ -67,6 +69,9 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 			}
 		}
 		if n == 0 {
+			for _, l := range pending {
+				controls += l.controls
+			}
 			pending, size = pending[:0], 0
 			return true
 		}
@@ -87,6 +92,9 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 			Continued: continued, Attrs: map[string]string{gofastcore.AttrLanguage: format},
 			Loc: gofastcore.Location{Offset: off, Length: m.Source(end) - off}})
 		emitted = pending[len(pending)-1].end
+		for _, l := range pending {
+			controls += l.controls
+		}
 		continued = !last
 		pending, size = pending[:0], 0
 		return true
@@ -121,6 +129,7 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 		}
 		if len(pending) == 0 && l.blank {
 			emitted = l.end // blank lines before a block are in none
+			controls += l.controls
 			continue
 		}
 		// A long document is split at a line end, after a line with
@@ -145,6 +154,9 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			textCutMessage(part.Kind)+" ("+count(dataLinesFrom(decoded, emitted), "line", "lines")+" not read)")
 	}
+	if controls > 0 {
+		part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(controls, "the text"))
+	}
 	if len(part.Blocks) == 0 && !cut && !spent {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")
 	}
@@ -168,8 +180,9 @@ func dataNextLine(b []byte, pos int) (dataLine, int) {
 	case i < len(b):
 		next = i + 1
 	}
-	text := dropControls(nil, b[pos:i])
-	return dataLine{text: text, start: pos, end: next, blank: len(bytes.TrimSpace(text)) == 0}, next
+	controls := 0
+	text := dropControls(nil, b[pos:i], &controls)
+	return dataLine{text: text, start: pos, end: next, blank: len(bytes.TrimSpace(text)) == 0, controls: controls}, next
 }
 
 // yamlMarker reports whether a line is a YAML document marker ("---" or
@@ -182,8 +195,9 @@ func yamlMarker(line []byte, marker string) bool {
 }
 
 // dropControls appends src to dst without its control characters other
-// than tab: verbatim otherwise, as code is. src is valid UTF-8.
-func dropControls(dst, src []byte) []byte {
+// than tab: verbatim otherwise, as code is. src is valid UTF-8, a line
+// without its end. The characters dropped are counted in *controls.
+func dropControls(dst, src []byte, controls *int) []byte {
 	from := 0
 	for i := 0; i < len(src); {
 		c := src[i]
@@ -198,6 +212,7 @@ func dropControls(dst, src []byte) []byte {
 			i++
 			continue
 		}
+		*controls++
 		dst = append(dst, src[from:i]...)
 		i += n
 		from = i

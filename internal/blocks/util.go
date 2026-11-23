@@ -18,9 +18,9 @@ func (w *walker) title(n *dom.Node) {
 		return
 	}
 	w.res.Title = true
-	t := cleanProse(string(textOf(n)), true)
+	t, ctl := cleanProse(string(textOf(n)), true)
 	before := w.res.MetaCut
-	w.res.Meta.Title = w.metaValue(t)
+	w.res.Meta.Title = w.metaValue(t, ctl)
 	w.res.TitleCut = w.res.MetaCut > before
 }
 
@@ -37,7 +37,7 @@ func (w *walker) meta(n *dom.Node) {
 	}
 	name, _ := n.Attr("name")
 	m := &w.res.Meta
-	v := cleanProse(content, true)
+	v, ctl := cleanProse(content, true)
 	if v == "" {
 		return
 	}
@@ -45,7 +45,7 @@ func (w *walker) meta(n *dom.Node) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "author":
 		if len(m.Authors) < MaxMetaList {
-			m.Authors = append(m.Authors, w.metaValue(v))
+			m.Authors = append(m.Authors, w.metaValue(v, ctl))
 		} else {
 			w.res.AuthorsLeftOut++
 		}
@@ -54,22 +54,25 @@ func (w *walker) meta(n *dom.Node) {
 			m.Extra = map[string]string{}
 		}
 		if _, ok := m.Extra["description"]; !ok {
-			m.Extra["description"] = w.metaValue(v)
+			m.Extra["description"] = w.metaValue(v, ctl)
 		}
 	case "keywords":
 		if len(m.Keywords) < MaxMetaList {
-			m.Keywords = append(m.Keywords, w.metaValue(v))
+			m.Keywords = append(m.Keywords, w.metaValue(v, ctl))
 		} else {
 			w.res.KeywordsLeftOut++
 		}
 	case "generator":
 		if m.Application == "" {
-			m.Application = w.metaValue(v)
+			m.Application = w.metaValue(v, ctl)
 		}
 	}
 }
 
-func (w *walker) metaValue(s string) string {
+// metaValue returns a metadata value used, cut to MaxMeta, and counts the
+// control characters ctl dropped from it.
+func (w *walker) metaValue(s string, ctl int) string {
+	w.res.Controls += ctl
 	if len(s) <= MaxMeta {
 		return s
 	}
@@ -143,7 +146,7 @@ func (w *walker) image(n *dom.Node) {
 			img.ID = "sha256:" + hex.EncodeToString(sum[:16])
 		}
 	}
-	w.later(gofastcore.Block{Kind: gofastcore.KindImage, Text: cleanProse(alt, true), Image: img,
+	w.later(gofastcore.Block{Kind: gofastcore.KindImage, Text: w.prose(alt, true), Image: img,
 		Display: n.Display, Loc: w.loc(n.Start, n.End, w.anchorOf(n))})
 }
 
@@ -232,26 +235,33 @@ func textOf(n *dom.Node) []byte {
 
 // Clean makes a string read from outside a page (EPUB metadata, a table
 // of contents) into prose: invalid UTF-8 replaced, white space collapsed,
-// control characters dropped, ligatures written as letters.
-func Clean(s string) string {
-	return cleanProse(strings.ToValidUTF8(s, "�"), true)
+// control characters dropped, ligatures written as letters. It returns
+// the number of control characters dropped.
+func Clean(s string) (string, int) {
+	return cleanProse(strings.ToValidUTF8(s, "\uFFFD"), true)
 }
 
 // cleanProse collapses white space (keeping line breaks when lines is
-// false), drops control characters and writes ligatures as letters.
-func cleanProse(s string, collapse bool) string {
+// false), drops control characters and writes ligatures as letters. It
+// returns the number of control characters dropped (white space and line
+// ends are not counted).
+func cleanProse(s string, collapse bool) (string, int) {
+	n := 0
 	b := newBuf()
+	b.controls = &n
 	ws := dom.Normal
 	if !collapse {
 		ws = dom.PreLine
 	}
 	b.add([]byte(s), ws, 0, false)
 	t, _, _ := b.finish()
-	return t
+	return t, n
 }
 
 // cleanRef drops control characters and surrounding white space from an
-// address or name, which is otherwise left as the source has it.
+// address or name, which is otherwise left as the source has it. What it
+// drops is not counted in Result.Controls: an address or a name
+// identifies something, and is not text.
 func cleanRef(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
@@ -260,6 +270,14 @@ func cleanRef(s string) string {
 		return r
 	}, s)
 	return strings.TrimSpace(s)
+}
+
+// prose is cleanProse for a value that is output: it counts what is
+// dropped.
+func (w *walker) prose(s string, collapse bool) string {
+	t, n := cleanProse(s, collapse)
+	w.res.Controls += n
+	return t
 }
 
 // anchorOf returns n's id, or for an <a>, its name; an id longer than
