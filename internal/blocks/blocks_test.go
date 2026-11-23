@@ -28,11 +28,11 @@ func walk(t *testing.T, src string, cfg Config) *Result {
 
 func TestBufCollapse(t *testing.T) {
 	b := newBuf()
-	b.add([]byte("  a \n\t b  "), dom.Normal, 0, false)
-	b.add([]byte(" c"), dom.Normal, gofastcore.DisplayNoInk, false)
+	b.add("  a \n\t b  ", dom.Normal, 0, false)
+	b.add(" c", dom.Normal, gofastcore.DisplayNoInk, false)
 	b.lineBreak()
-	b.add([]byte("  d\r\ne\x01"), dom.Pre, 0, false)
-	b.add([]byte("x\ny  z"), dom.PreLine, 0, false)
+	b.add("  d\r\ne\x01", dom.Pre, 0, false)
+	b.add("x\ny  z", dom.PreLine, 0, false)
 	text, h, spans := b.finish()
 	if text != "a b c\n  d\nex\ny z" {
 		t.Errorf("text %q", text)
@@ -44,9 +44,9 @@ func TestBufCollapse(t *testing.T) {
 
 func TestBufWholeDisplay(t *testing.T) {
 	b := newBuf()
-	b.add([]byte("a "), dom.Normal, gofastcore.DisplayHidden, false)
-	b.add([]byte(" "), dom.Normal, 0, false)
-	b.add([]byte("b"), dom.Normal, gofastcore.DisplayHidden, false)
+	b.add("a ", dom.Normal, gofastcore.DisplayHidden, false)
+	b.add(" ", dom.Normal, 0, false)
+	b.add("b", dom.Normal, gofastcore.DisplayHidden, false)
 	text, h, spans := b.finish()
 	if text != "a b" || h != gofastcore.DisplayHidden || len(spans) != 0 {
 		t.Errorf("%q %s %+v", text, h, spans)
@@ -55,7 +55,7 @@ func TestBufWholeDisplay(t *testing.T) {
 
 func TestVerbatim(t *testing.T) {
 	b := newBuf()
-	b.add([]byte(" \xEF\xAC\x81\t\x00x \n"), dom.Pre, 0, true)
+	b.add(" \xEF\xAC\x81\t\x00x \n", dom.Pre, 0, true)
 	// The final line ending is dropped; the rest is as it stands.
 	if got, _, _ := b.verbatimText(); got != " \xEF\xAC\x81\tx " {
 		t.Errorf("%q", got)

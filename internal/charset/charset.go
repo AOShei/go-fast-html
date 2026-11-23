@@ -195,6 +195,9 @@ type Result struct {
 	// not valid UTF-8: Enc was recognised from the bytes (detect.go), or
 	// is windows-1252 for text whose bytes read as it.
 	Guessed bool
+	// valid reports that the whole input was found to be valid UTF-8 (and
+	// has no byte order mark), so that Decode need not look again.
+	valid bool
 	// Unknown reports that nothing declared the encoding, the input is not
 	// valid UTF-8, and no encoding is certain: read as windows-1252 it
 	// would be garbage. Enc is Windows1252.
@@ -252,7 +255,7 @@ func SniffText(b []byte, tr string) Result {
 		}
 	}
 	if utf8.Valid(b) {
-		return Result{Enc: UTF8, From: FromDetected, Transport: bad}
+		return Result{Enc: UTF8, From: FromDetected, Transport: bad, valid: true}
 	}
 	r := detect(b)
 	r.Transport = bad
@@ -311,7 +314,7 @@ func sniffMeta(b []byte) Result {
 		}
 	}
 	if valid == 1 || valid == -1 && utf8.Valid(b) {
-		return Result{Enc: UTF8, From: FromDetected}
+		return Result{Enc: UTF8, From: FromDetected, valid: true}
 	}
 	return detect(b)
 }
@@ -587,7 +590,7 @@ func isLead(cp int, b byte) bool {
 func Decode(src []byte, r Result, limit int64) (out []byte, m *Map, invalid int, cut bool) {
 	m = &Map{src: src, enc: r.Enc, base: int64(r.BOM)}
 	body := src[r.BOM:]
-	if r.Enc == UTF8 && utf8.Valid(body) {
+	if r.Enc == UTF8 && (r.valid || utf8.Valid(body)) {
 		m.identity = true
 		if int64(len(body)) > limit {
 			// Cut at a character boundary.

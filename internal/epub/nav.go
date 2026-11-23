@@ -201,7 +201,7 @@ func text(n *dom.Node) (string, bool) {
 	walk = func(p *dom.Node) {
 		for c := p.FirstChild; c != nil && !cut; c = c.Next {
 			if c.Type == dom.TextNode {
-				b, cut = appendCapped(b, c.Text, MaxTitle)
+				b, cut = appendCapped(b, []byte(c.Text), MaxTitle)
 			} else if c.Type == dom.ElementNode {
 				walk(c)
 			}

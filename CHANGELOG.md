@@ -2,8 +2,12 @@
 
 ## Unreleased
 
-Encodings the benchmark against Common Crawl found missing, and a
-`<meta>` declaration past the first 1024 bytes.
+Encodings the benchmark against Common Crawl found missing, a `<meta>`
+declaration past the first 1024 bytes, and speed: about 1.75 times
+faster with one worker and 2 times with 24 on the 9,835 pages of
+`bench/`, the output of the speed work unchanged byte for byte.
+
+### Encodings
 
 - **Decoded now:** GB18030 (with its four-byte sequences), EUC-JP,
   IBM866, ISO-8859-2 to 8 (and 8-i), 10 and 13 to 16, KOI8-R, KOI8-U and
@@ -25,6 +29,30 @@ Encodings the benchmark against Common Crawl found missing, and a
 - `TestDecodeDeclared` decodes texts written for the tests in each of
   these encodings back to the original exactly; `FuzzDoubleByte` covers
   GB18030 and EUC-JP.
+
+### Faster
+
+- **The tokenizer copies nothing it need not.** Text, attribute values and
+  names with no character reference are slices of the page, not copies,
+  and a run of text is found with a byte search; the tree's text nodes are
+  strings sharing that memory. What is kept past the extraction (link
+  targets, anchors, names) is copied, so that a document does not hold its
+  page; `TestNoAliasOfPage` checks every string of the result.
+- **Fewer allocations:** the tree's nodes and the attributes of tags are
+  allocated in blocks, and the list of blocks starts near the size a page
+  of its length has. From 28 million allocations for 3,000 pages to 5.4
+  million, and 3.6 GB to 2.5 GB.
+- **The text buffer copies runs** of characters that need nothing done
+  whole, found with a table of byte classes, instead of a character at a
+  time.
+- The scopes of the HTML standard's "has an element in scope" are bits on
+  each element instead of maps; an address or name with no control
+  character is not rebuilt; valid UTF-8 is checked once, not twice.
+- With one worker the 9,835 pages take 5.8 to 6.0 s (10.3 s before), with
+  24 workers 1.05 s (2.1 s); peak memory with 24 workers 199 to 231 MB (264
+  MB). `BenchmarkCorpusPages` and `TestCorpusIdentity` (both on pages
+  `GOFASTHTML_PAGES` lists, skipped without it) measure the speed and check
+  the output against a run before a change.
 
 ## v0.3.0 (2026-11-23)
 
