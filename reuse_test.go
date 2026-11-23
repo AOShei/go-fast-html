@@ -28,7 +28,9 @@ func TestInputReused(t *testing.T) {
 	}
 	inputs := map[string]func(i int) string{
 		"html": page,
-		"md":   func(i int) string { return fmt.Sprintf("# Title %d\n\nText [link %d](/l/%d) ![alt %d](/i%d.png)\n\n```go\ncode %d\n```\n", i, i, i, i, i, i) },
+		"md": func(i int) string {
+			return fmt.Sprintf("# Title %d\n\nText [link %d](/l/%d) ![alt %d](/i%d.png)\n\n```go\ncode %d\n```\n", i, i, i, i, i, i)
+		},
 		"txt":  func(i int) string { return fmt.Sprintf("Plain text %d\n\nsecond paragraph %d\n", i, i) },
 		"csv":  func(i int) string { return fmt.Sprintf("name,value\nrow%d,%d\nother%d,x%d\n", i, i, i, i) },
 		"json": func(i int) string { return fmt.Sprintf("{\"key%d\": \"value %d\"}\n", i, i) },
