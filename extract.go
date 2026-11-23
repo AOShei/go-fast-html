@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/blocks"
@@ -297,8 +298,9 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	if size > gofastcore.ResolveLimit(opts.Limits.MaxInputBytes, DefaultMaxInputBytes) {
 		return nil, fmt.Errorf("gofasthtml: input of %d bytes is larger than the limit: %w", size, gofastcore.ErrLimitExceeded)
 	}
-	src := make([]byte, size)
+	src := inputBuffer(size)
 	if n, err := r.ReadAt(src, 0); n < len(src) {
+		releaseInput(src)
 		if err == nil || errors.Is(err, io.EOF) {
 			err = io.ErrUnexpectedEOF
 		}
@@ -308,6 +310,12 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	format := e.Format
 	if format == "" {
 		format = Detect(opts.Name, src)
+	}
+	switch format {
+	case "html", "md", "txt", "csv", "tsv", "json", "yaml", "ipynb":
+		// What these keep of the input is copied (TestInputReused), so
+		// its buffer goes to the next input. An EPUB's is not reused.
+		defer releaseInput(src)
 	}
 	mime, known := mimeTypes[format]
 	if !known {
@@ -607,6 +615,9 @@ func (e *Extractor) walk(ctx context.Context, page []byte, source func(int) int6
 	if err != nil {
 		return walked{}, err
 	}
+	// The result of the walk shares no memory with the tree (blocks'
+	// TestNoAliasOfPage), which is given back for the next page.
+	defer tree.Release()
 	res, err := blocks.Walk(ctx, tree.Root, blocks.Config{
 		Spans: opts.Spans, Images: opts.Images, Budget: pc.text, Decode: pc.decode, Source: source, Image: pc.image, Internal: pc.internal,
 		MaxDepth: e.MaxDepth,
@@ -748,4 +759,47 @@ func blocksLabel(s string) string {
 func controlsMessage(n int, what string) string {
 	return count(n, "control character", "control characters") + " with no meaning as text " +
 		map[bool]string{true: "was", false: "were"}[n == 1] + " removed from " + what
+}
+
+// Input buffers are reused from one document to the next, in classes of
+// powers of two from 64 KiB to 8 MiB; a larger input has a buffer of its
+// own. Go empties the pools as it collects garbage, so what they hold is
+// bounded by what the workers use at once.
+const (
+	minInputClass = 16 // 64 KiB
+	maxInputClass = 23 // 8 MiB
+)
+
+var inputPools [maxInputClass + 1]sync.Pool
+
+func inputClass(size int64) int {
+	c := minInputClass
+	for c <= maxInputClass && int64(1)<<c < size {
+		c++
+	}
+	return c
+}
+
+// inputBuffer returns a buffer of size bytes, from a pool when there is
+// one of its class.
+func inputBuffer(size int64) []byte {
+	c := inputClass(size)
+	if c > maxInputClass {
+		return make([]byte, size)
+	}
+	if p, ok := inputPools[c].Get().(*[]byte); ok {
+		return (*p)[:size]
+	}
+	return make([]byte, size, int64(1)<<c)
+}
+
+// releaseInput gives a buffer of inputBuffer back: nothing may use it
+// after.
+func releaseInput(b []byte) {
+	c := inputClass(int64(cap(b)))
+	if c > maxInputClass || int64(cap(b)) != int64(1)<<c {
+		return
+	}
+	b = b[:cap(b)]
+	inputPools[c].Put(&b)
 }

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/dom"
@@ -246,6 +247,9 @@ func Clean(s string) (string, int) {
 // returns the number of control characters dropped (white space and line
 // ends are not counted).
 func cleanProse(s string, collapse bool) (string, int) {
+	if proseAsIs(s) {
+		return strings.Clone(s), 0
+	}
 	n := 0
 	b := newBuf()
 	b.controls = &n
@@ -492,4 +496,55 @@ func hasControl(s string) bool {
 		}
 	}
 	return false
+}
+
+// verbatimAsIs reports whether buf.add, in verbatim text, would append s
+// as it is: no control character but tab and line feed (no CR, which
+// becomes a line feed), and no C1 control.
+func verbatimAsIs(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 && c != '\n' && c != '\t' || c == 0x7F || c == 0xC2 && i+1 < len(s) && s[i+1] >= 0x80 && s[i+1] <= 0x9F {
+			return false
+		}
+	}
+	return true
+}
+
+// isBlankString is isBlank for a string: only spaces, tabs and line feeds.
+func isBlankString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c != ' ' && c != '\n' && c != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+// proseAsIs reports whether cleanProse would give s back as it is: no
+// white space but single spaces between words, no control character, no
+// ligature.
+func proseAsIs(s string) bool {
+	if s == "" || s[0] == ' ' || s[len(s)-1] == ' ' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c < 0x20 || c == 0x7F:
+			return false
+		case c == ' ' && s[i+1] == ' ':
+			return false
+		case c == 0xC2 && i+1 < len(s) && s[i+1] >= 0x80 && s[i+1] <= 0x9F:
+			return false
+		case c == 0xEF && i+2 < len(s) && s[i+1] == 0xAC && s[i+2] <= 0x86:
+			return false
+		case c >= 0x80:
+			// Any other space character is collapsed as white space.
+			if r, _ := utf8.DecodeRuneInString(s[i:]); unicode.IsSpace(r) {
+				return false
+			}
+		}
+	}
+	return true
 }

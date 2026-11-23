@@ -24,6 +24,8 @@ The command `cmd/gofasthtml` prints JSON, Markdown or text for files, directorie
 
 This library produces no running headers and footers itself; `-furniture` is there for the documents other extractors may return as children. Its stored part holds scripts, styles, `<input type=hidden>` values and EPUB images no chapter shows; markup comments are stored data too, kept where they stand. `-stored=markup_comment` shows the comments alone (Outlook's conditional comments, for example), `-stored=macro` the scripts, `-stored=stylesheet` the styles.
 
+**Speed and memory.** On 9,835 pages of a web crawl the library is compared with nine Python and Rust extractors in [`bench/`](bench/README.md). For a batch, memory is reused from one document to the next: the input buffer and the tree's nodes and attributes go back to pools when a page is done, and nothing in a document refers to them (`TestInputReused`). The command runs with Go's garbage collector at `GOGC=200` unless `GOGC` is set: half as many collections as Go's default, which reads a batch with 24 workers about 15% faster for about twice the peak memory. `GOGC=100` uses the least memory; `GOGC=400` is faster still and uses more. A program using the library sets this for itself (`debug.SetGCPercent`, or `GOGC`).
+
 **Status: v0.3.0 (2026-11-23).** The changes are in [`CHANGELOG.md`](CHANGELOG.md); the development history and the items still open are in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
 ## What is read

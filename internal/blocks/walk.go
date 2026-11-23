@@ -733,12 +733,21 @@ func (w *walker) storedCode(n *dom.Node, lang, stored string) {
 	if w.stop {
 		return
 	}
-	saved := w.buf
-	w.buf = w.newBuf()
-	w.verbatim(n)
-	b := w.buf
-	w.buf = saved
-	text, _, _ := b.verbatimText()
+	var text string
+	if c := n.FirstChild; c != nil && c.Next == nil && c.Type == dom.TextNode && verbatimAsIs(c.Text) {
+		// One text node with nothing to drop or change, as most scripts
+		// and style sheets are: what verbatimText would give, in one copy.
+		if !isBlankString(c.Text) {
+			text = strings.Clone(strings.TrimSuffix(c.Text, "\n"))
+		}
+	} else {
+		saved := w.buf
+		w.buf = w.newBuf()
+		w.verbatim(n)
+		b := w.buf
+		w.buf = saved
+		text, _, _ = b.verbatimText()
+	}
 	if text == "" {
 		return
 	}
