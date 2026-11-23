@@ -62,6 +62,11 @@ type Result struct {
 	// LanguagesLeftOut counts the code blocks whose language is longer
 	// than MaxLang, left out.
 	LanguagesLeftOut int
+	// Controls counts the control characters with no meaning as text
+	// dropped from the text: of blocks, notes, alt text and metadata
+	// values. White space, line ends and tabs are not counted, nor what
+	// is dropped from addresses and names (anchors, links, languages).
+	Controls int
 	// Images counts img elements, whether or not blocks were made.
 	Images int
 	// Stylesheets counts style elements and linked stylesheets, whose
@@ -148,9 +153,18 @@ type openSpan struct {
 	href  string
 }
 
+// newBuf returns a buffer whose dropped control characters are counted
+// in the result.
+func (w *walker) newBuf() *buf {
+	b := newBuf()
+	b.controls = &w.res.Controls
+	return b
+}
+
 // Walk produces the blocks of the tree under root.
 func Walk(ctx context.Context, root *dom.Node, cfg Config) (*Result, error) {
-	w := &walker{ctx: ctx, cfg: cfg, res: &Result{}, buf: newBuf()}
+	w := &walker{ctx: ctx, cfg: cfg, res: &Result{}}
+	w.buf = w.newBuf()
 	w.children(root)
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -687,7 +701,7 @@ func (w *walker) code(n *dom.Node, lang string) {
 		return
 	}
 	saved := w.buf
-	w.buf = newBuf()
+	w.buf = w.newBuf()
 	w.verbatim(n)
 	b := w.buf
 	w.buf = saved
@@ -715,7 +729,7 @@ func (w *walker) storedCode(n *dom.Node, lang, stored string) {
 		return
 	}
 	saved := w.buf
-	w.buf = newBuf()
+	w.buf = w.newBuf()
 	w.verbatim(n)
 	b := w.buf
 	w.buf = saved
@@ -806,7 +820,7 @@ func (w *walker) script(n *dom.Node) {
 const StoredStylesheet = gofastcore.StoredStylesheet
 
 func (w *walker) comment(n *dom.Node) {
-	text := cleanProse(string(n.Text), false)
+	text := w.prose(string(n.Text), false)
 	if text == "" {
 		return
 	}
@@ -830,13 +844,14 @@ func (w *walker) choices(n *dom.Node) {
 			}
 			w.activeAttrs(c)
 			if c.Name == "option" {
-				t := cleanProse(string(textOf(c)), true)
+				t, ctl := cleanProse(string(textOf(c)), true)
 				if t == "" {
-					t, _ = c.Attr("label")
-					t = cleanProse(t, true)
+					label, _ := c.Attr("label")
+					t, ctl = cleanProse(label, true)
 				}
 				if t != "" {
 					lines = append(lines, t)
+					w.res.Controls += ctl
 				}
 				continue
 			}
@@ -894,7 +909,7 @@ func (w *walker) input(n *dom.Node) {
 	}
 	if typ == "hidden" {
 		// Form data the page sends and does not show: the stored part.
-		text := cleanProse(v, true)
+		text := w.prose(v, true)
 		if text == "" {
 			return
 		}
@@ -912,7 +927,7 @@ func (w *walker) input(n *dom.Node) {
 // field emits the value of a form control as a paragraph that names the
 // control.
 func (w *walker) field(n *dom.Node, value string, ws dom.WS) {
-	b := newBuf()
+	b := w.newBuf()
 	b.add([]byte(value), ws, n.Display, false)
 	text, display, spans := b.finish()
 	if text == "" {

@@ -27,9 +27,19 @@ type buf struct {
 	start, end int
 	anchor     string
 	href       string // the first link, for a table cell
+	// controls, when set, counts the control characters add drops:
+	// those with no meaning as text, not white space, line ends or tabs.
+	controls *int
 }
 
 func newBuf() *buf { return &buf{start: -1} }
+
+// dropped counts a control character add drops.
+func (b *buf) dropped() {
+	if b.controls != nil {
+		*b.controls++
+	}
+}
 
 func (b *buf) reset() {
 	b.b = b.b[:0]
@@ -137,6 +147,8 @@ func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Display, verbatim bool) {
 						b.space()
 					}
 					b.b = append(b.b, c)
+				} else if c != '\f' {
+					b.dropped()
 				}
 				continue
 			}
@@ -150,6 +162,7 @@ func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Display, verbatim bool) {
 				continue
 			}
 			if c < 0x20 || c == 0x7F {
+				b.dropped()
 				continue
 			}
 			b.space()
@@ -160,6 +173,7 @@ func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Display, verbatim bool) {
 		chunk := t[i : i+size]
 		i += size
 		if unicode.IsControl(r) {
+			b.dropped()
 			continue
 		}
 		if !verbatim {

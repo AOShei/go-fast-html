@@ -47,7 +47,7 @@ func (w *walker) attrNotes(n *dom.Node) {
 		if !textAttr(a.Name, n.Name) {
 			continue
 		}
-		v := cleanProse(a.Value, true)
+		v, ctl := cleanProse(a.Value, true)
 		if v == "" || contains(seen, v) {
 			continue
 		}
@@ -56,10 +56,13 @@ func (w *walker) attrNotes(n *dom.Node) {
 			continue
 		}
 		if n.Name == "img" {
-			if alt, ok := n.Attr("alt"); ok && cleanProse(alt, true) == v {
-				continue
+			if alt, ok := n.Attr("alt"); ok {
+				if a, _ := cleanProse(alt, true); a == v {
+					continue
+				}
 			}
 		}
+		w.res.Controls += ctl
 		w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: v,
 			Attrs: map[string]string{gofastcore.AttrNoteType: NoteAttribute, AttrAttribute: a.Name},
 			Loc:   w.loc(a.ValStart, a.ValEnd, w.anchorOf(n))})
@@ -103,5 +106,6 @@ func elementText(n *dom.Node, limit int) (string, bool) {
 	if over {
 		return "", false
 	}
-	return cleanProse(string(out), true), true
+	t, _ := cleanProse(string(out), true)
+	return t, true
 }

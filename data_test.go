@@ -214,7 +214,7 @@ func FuzzData(f *testing.F) {
 			// are the input's lines, control characters dropped, blank
 			// lines at the start and end left out.
 			// (Valid UTF-8 with zero bytes may be UTF-16.)
-			if format == "json" && !small && utf8.Valid(b) && !bytes.HasPrefix(b, []byte("\xEF\xBB\xBF")) && !hasWarning(doc, WarnCharsetDetected) {
+			if format == "json" && !small && utf8.Valid(b) && !bytes.HasPrefix(b, []byte("\xEF\xBB\xBF")) && !hasWarning(doc, gofastcore.WarnTextEncodingDetected) {
 				var lines []string
 				for pos := 0; pos < len(b); {
 					l, next := dataNextLine(b, pos)

@@ -35,8 +35,9 @@ UTF-8 or declares its encoding is not judged, and reads as before.
   the 1,000 most frequent Chinese characters come from the Unicode
   Consortium's Unihan database (`internal/charset/common.go`, see
   `NOTICE`).
-- **`html.charset_detected`** (warning) names the encoding a document was
-  read in when it was recognised from its bytes.
+- **`text.encoding_detected`** (warning; a go-fast-core v0.1.2 code) names
+  the encoding a document was read in when it was recognised from its
+  bytes.
 - **`ErrEncodingUnknown`** (wraps `gofastcore.ErrUnsupported`) for input
   whose encoding is not certain, with a message that says to give it with
   `Extractor.Charset` (command: `-charset`). A chapter of an EPUB is read
@@ -51,6 +52,16 @@ UTF-8 or declares its encoding is not judged, and reads as before.
   garbage and now reads as Russian.
 - The double-byte code pages' tables are found by a switch instead of a
   map, for every character decoded.
+
+### Control characters removed are reported
+
+Control characters with no meaning as text (NUL, ESC, vertical tab, the
+C1 controls) were removed from text silently, as the text conventions
+require. They are now counted, and the part (or, for the metadata and an
+EPUB's table of contents, the document) has `text.control_characters_removed`
+(info, a go-fast-core v0.1.2 code) with the count. Tab, line ends and form
+feed are not counted, nor what is removed from addresses and names. This
+library now requires go-fast-core v0.1.2.
 
 ### Faster
 

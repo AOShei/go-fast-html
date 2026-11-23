@@ -140,7 +140,7 @@ func spanAttr(n *dom.Node, name string, lo, hi int) int {
 // cellText reads a cell's text: block boundaries in it are line breaks.
 func (w *walker) cellText(td *dom.Node) (string, gofastcore.Display, string) {
 	saved := w.buf
-	w.buf = newBuf()
+	w.buf = w.newBuf()
 	w.cell++
 	w.children(td)
 	w.cell--
