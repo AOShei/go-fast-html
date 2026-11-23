@@ -3,6 +3,7 @@ package gofasthtml
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -190,7 +191,12 @@ func FuzzData(f *testing.F) {
 			opts.Limits = gofastcore.Limits{MaxTextBytes: 600, MaxDecodedBytes: 2000}
 		}
 		for _, format := range []string{"json", "yaml"} {
-			doc, err := (&Extractor{Format: format}).Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+			e := &Extractor{Format: format}
+			doc, err := e.Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+			if errors.Is(err, ErrEncodingUnknown) {
+				e.Charset = "windows-1252"
+				doc, err = e.Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -207,7 +213,8 @@ func FuzzData(f *testing.F) {
 			// JSON in UTF-8, read whole: the blocks joined with line feeds
 			// are the input's lines, control characters dropped, blank
 			// lines at the start and end left out.
-			if format == "json" && !small && utf8.Valid(b) && !bytes.HasPrefix(b, []byte("\xEF\xBB\xBF")) {
+			// (Valid UTF-8 with zero bytes may be UTF-16.)
+			if format == "json" && !small && utf8.Valid(b) && !bytes.HasPrefix(b, []byte("\xEF\xBB\xBF")) && !hasWarning(doc, WarnCharsetDetected) {
 				var lines []string
 				for pos := 0; pos < len(b); {
 					l, next := dataNextLine(b, pos)

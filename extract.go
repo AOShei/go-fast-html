@@ -57,6 +57,16 @@ const (
 //	child.encrypted           an embedded document of an EPUB is encrypted
 //	                          and was not opened
 //
+// ErrEncodingUnknown is returned for text that declares no encoding, is
+// not valid UTF-8, and whose bytes are not certainly one of the encodings
+// recognised: read as windows-1252 it would not be text. Give the
+// encoding with Extractor.Charset (the command's -charset). It wraps
+// gofastcore.ErrUnsupported. The chapters of an EPUB are read as
+// windows-1252 instead, with WarnCharsetDetected.
+var ErrEncodingUnknown = fmt.Errorf("%w: the encoding of the text could not be determined: none is declared, it is not UTF-8, "+
+	"and its bytes are not certainly windows-1252, windows-1251, Shift_JIS, GBK, Big5, EUC-KR or UTF-16; "+
+	"give the encoding with Extractor.Charset (command: -charset)", gofastcore.ErrUnsupported)
+
 // An embedded document handed to gofastcore.Options.ExtractChild may also
 // carry child.not_extracted, child.unsupported or child.failed, which that
 // function sets. The EPUB codes are in epub.go.
@@ -67,6 +77,13 @@ const (
 	// and it was ignored. An EPUB has one such warning for all its
 	// chapters, with their number and the labels.
 	WarnCharsetUnsupported = "html.charset_unsupported"
+	// WarnCharsetDetected: the input declares no encoding (no byte order
+	// mark, no Extractor.Charset, no <meta>) and is not valid UTF-8; it
+	// was read in the encoding its bytes were recognised as, which the
+	// message names. Severity warning: the encoding is not declared,
+	// though only one that is certain is used (see ErrEncodingUnknown).
+	// An EPUB has one such warning for all its chapters.
+	WarnCharsetDetected = "html.charset_detected"
 	// WarnNestingFlattened: elements are nested deeper than the limit.
 	// Below it, elements were placed beside each other instead of inside
 	// each other; their text is all there, and the reasons it is hidden
@@ -356,11 +373,54 @@ type tally struct {
 	charsets         []string           // declared encodings not decoded, each once
 	charsetCount     map[string]int     // how many pages declare each
 	transport        string             // Extractor.Charset, when not decoded
+	detected         []string           // encodings recognised from the bytes, each once
+	detectedCount    map[string]int     // how many pages were read in each
 	stored           []gofastcore.Block // for the stored part
+}
+
+// sniffed records what the encoding sniffing of a page found, and
+// returns ErrEncodingUnknown when nothing was certain, unless the page is
+// a chapter of an EPUB, which is then read as windows-1252.
+func (t *tally) sniffed(enc *charset.Result, chapter bool) error {
+	if enc.Transport != "" {
+		t.transport = blocksLabel(enc.Transport)
+	}
+	if enc.Unknown && !chapter {
+		return ErrEncodingUnknown
+	}
+	if enc.Guessed || enc.Unknown {
+		label := enc.Enc.String()
+		if enc.Unknown {
+			label += " (not determined)"
+		}
+		if t.detectedCount[label] == 0 {
+			if t.detectedCount == nil {
+				t.detectedCount = map[string]int{}
+			}
+			t.detected = append(t.detected, label)
+		}
+		t.detectedCount[label]++
+	}
+	return nil
 }
 
 // finish adds the document's warnings.
 func (t *tally) finish(doc *gofastcore.Document) {
+	if len(t.detected) == 1 && t.detectedCount[t.detected[0]] == 1 {
+		doc.Warn(gofastcore.SeverityWarning, WarnCharsetDetected,
+			fmt.Sprintf("no encoding is declared and the text is not UTF-8; it was read as %s, recognised from its bytes; "+
+				"if that is wrong, give the encoding with Extractor.Charset (command: -charset)", t.detected[0]))
+	} else if len(t.detected) > 0 {
+		pages := 0
+		var list []string
+		for _, c := range t.detected {
+			pages += t.detectedCount[c]
+			list = append(list, fmt.Sprintf("%s in %d", c, t.detectedCount[c]))
+		}
+		doc.Warn(gofastcore.SeverityWarning, WarnCharsetDetected,
+			fmt.Sprintf("%d chapters declare no encoding and are not UTF-8; they were read as %s, recognised from their bytes",
+				pages, strings.Join(list, ", ")))
+	}
 	if t.transport != "" {
 		doc.Warn(gofastcore.SeverityWarning, WarnCharsetUnsupported,
 			fmt.Sprintf("the encoding %q was given with the input and is not decoded; it was ignored", t.transport))
@@ -462,8 +522,8 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	if format == "html" {
 		enc = charset.Sniff(src, pc.charset)
 	}
-	if enc.Transport != "" {
-		t.transport = blocksLabel(enc.Transport)
+	if err := t.sniffed(&enc, pc.chapter); err != nil {
+		return nil, err
 	}
 	if enc.Unsupported {
 		label := blocksLabel(enc.Declared)

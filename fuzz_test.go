@@ -47,7 +47,13 @@ func FuzzExtract(f *testing.F) {
 			{Spans: true},
 		} {
 			format := []string{"html", "md", "txt"}[(i+len(b))%3]
-			doc, err := (&Extractor{Format: format, MaxDepth: 24}).Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+			e := &Extractor{Format: format, MaxDepth: 24}
+			doc, err := e.Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+			if errors.Is(err, ErrEncodingUnknown) {
+				// As a user would: give the encoding.
+				e.Charset = "windows-1252"
+				doc, err = e.Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -98,6 +104,10 @@ func FuzzCSV(f *testing.F) {
 			opts.Limits = gofastcore.Limits{MaxTextBytes: 2048, MaxDecodedBytes: 4096}
 		}
 		doc, err := e.Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+		if errors.Is(err, ErrEncodingUnknown) {
+			e.Charset = "windows-1252"
+			doc, err = e.Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

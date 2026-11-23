@@ -49,3 +49,12 @@ internal/css/color.go (colorNames)
   The named colors (section 6.1) and system colors (section 6.2) of the
   W3C CSS Color Module Level 4, https://www.w3.org/TR/css-color-4/,
   (c) World Wide Web Consortium. Only the names are used.
+
+internal/charset/common.go, gen/gen_common.py
+  Generated from the Unicode Consortium's Unihan database (Unihan.zip of
+  the Unicode Character Database): the kHanyuPinlu frequencies and the
+  kTraditionalVariant mappings. Copyright (c) 1991-2026 Unicode, Inc.,
+  Unicode License V3, whose text is in LICENSE-UNICODE.
+
+internal/charset/testdata/detect, gen/gen_detect.py
+  Texts written for these tests.

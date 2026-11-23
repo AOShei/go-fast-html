@@ -62,8 +62,8 @@ func (e *Extractor) csv(ctx context.Context, doc *gofastcore.Document, src []byt
 	part := gofastcore.Part{Kind: gofastcore.PartSheet, Number: 1, Name: csvPartName(opts.Name)}
 	t := &tally{}
 	enc := charset.SniffText(src, e.Charset)
-	if enc.Transport != "" {
-		t.transport = blocksLabel(enc.Transport)
+	if err := t.sniffed(&enc, false); err != nil {
+		return nil, err
 	}
 	decoded, _, invalid, cut := charset.Decode(src, enc, max(decode.Left(), 0))
 	decode.Take(int64(len(decoded)))

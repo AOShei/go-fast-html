@@ -19,6 +19,39 @@ named `.json`, `.jsonl`, `.ndjson`, `.geojson`, `.yaml` or `.yml`, which
 - **Command.** `-as json|yaml`; a directory includes these files.
 - `FuzzData`, in CI's fuzz smoke step.
 
+### Text that declares no encoding
+
+Input with no byte order mark, no `Extractor.Charset` and no `<meta>`
+declaration that is not valid UTF-8 was read as windows-1252, as the
+Encoding standard says, which made Japanese, Chinese, Korean and Russian
+text garbage. Its encoding is now recognised from its bytes where one is
+certain, and the input is refused where none is. Input that is valid
+UTF-8 or declares its encoding is not judged, and reads as before.
+
+- **Recognised**: UTF-8 with damaged bytes, UTF-16 without a byte order
+  mark (but Han text), Shift_JIS, EUC-KR, GBK, Big5, windows-1251, and
+  windows-1252 for text whose accented letters stand alone in words and
+  show nothing of another Latin code page. The tests are in the README;
+  the 1,000 most frequent Chinese characters come from the Unicode
+  Consortium's Unihan database (`internal/charset/common.go`, see
+  `NOTICE`).
+- **`html.charset_detected`** (warning) names the encoding a document was
+  read in when it was recognised from its bytes.
+- **`ErrEncodingUnknown`** (wraps `gofastcore.ErrUnsupported`) for input
+  whose encoding is not certain, with a message that says to give it with
+  `Extractor.Charset` (command: `-charset`). A chapter of an EPUB is read
+  as windows-1252 instead, with the warning.
+- **Measured** on Wikipedia articles in 30 languages in the code pages of
+  each: no file and no window of 1 KiB or more read in a wrong encoding.
+  The time is bounded: at most about 0.25 ms a file, 2 to 14 µs for 1 KiB.
+- **Input that is valid UTF-8 but has zero bytes** is tested for UTF-16
+  first, since UTF-16 of ASCII and Cyrillic is valid UTF-8.
+- A page of the public corpus (`tika-big-preamble.html`) that declares
+  windows-1251 after its first 1,024 bytes, too late for the prescan, was
+  garbage and now reads as Russian.
+- The double-byte code pages' tables are found by a switch instead of a
+  map, for every character decoded.
+
 ### Faster
 
 - **Text not in UTF-8 is located as fast as UTF-8.** Finding each

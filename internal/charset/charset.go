@@ -130,6 +130,14 @@ type Result struct {
 	// held to 64 bytes, when it names an encoding this package does not
 	// decode; it was ignored.
 	Transport string
+	// Guessed reports that nothing declared the encoding and the input is
+	// not valid UTF-8: Enc was recognised from the bytes (detect.go), or
+	// is windows-1252 for text whose bytes read as it.
+	Guessed bool
+	// Unknown reports that nothing declared the encoding, the input is not
+	// valid UTF-8, and no encoding is certain: read as windows-1252 it
+	// would be garbage. Enc is Windows1252.
+	Unknown bool
 }
 
 // transport looks up the caller's label. It returns the encoding and
@@ -177,10 +185,17 @@ func SniffText(b []byte, tr string) Result {
 	if ok {
 		return Result{Enc: enc, From: FromTransport}
 	}
+	if unmarkedUTF16(b) {
+		if enc, ok := utf16Unmarked(b[:min(len(b), detectSample)]); ok {
+			return Result{Enc: enc, From: FromDetected, Guessed: true, Transport: bad}
+		}
+	}
 	if utf8.Valid(b) {
 		return Result{Enc: UTF8, From: FromDetected, Transport: bad}
 	}
-	return Result{Enc: Windows1252, From: FromDetected, Transport: bad}
+	r := detect(b)
+	r.Transport = bad
+	return r
 }
 
 // Sniff decides the encoding of b, given the transport-layer label tr
@@ -214,10 +229,15 @@ func sniffMeta(b []byte) Result {
 		}
 		return r
 	}
+	if unmarkedUTF16(b) {
+		if enc, ok := utf16Unmarked(b[:min(len(b), detectSample)]); ok {
+			return Result{Enc: enc, From: FromDetected, Guessed: true}
+		}
+	}
 	if utf8.Valid(b) {
 		return Result{Enc: UTF8, From: FromDetected}
 	}
-	return Result{Enc: Windows1252, From: FromDetected}
+	return detect(b)
 }
 
 // labels maps the WHATWG Encoding standard's labels of the encodings
