@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 (2026-11-23)
 
 Encodings the benchmark against Common Crawl found missing, a `<meta>`
 declaration past the first 1024 bytes, and speed: about 1.75 times
