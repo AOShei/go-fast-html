@@ -283,8 +283,12 @@ const latePrescan = 1 << 20
 
 func sniffMeta(b []byte) Result {
 	label, ok := prescan(b[:min(len(b), 1024)])
-	if !ok && len(b) > 1024 && !utf8.Valid(b) {
-		label, ok = prescan(b[:min(len(b), latePrescan)])
+	valid := -1 // whether b is valid UTF-8, once known
+	if !ok && len(b) > 1024 {
+		valid = btoi(utf8.Valid(b))
+		if valid == 0 {
+			label, ok = prescan(b[:min(len(b), latePrescan)])
+		}
 	}
 	if ok {
 		r := Result{From: FromMeta, Declared: label}
@@ -306,10 +310,17 @@ func sniffMeta(b []byte) Result {
 			return Result{Enc: enc, From: FromDetected, Guessed: true}
 		}
 	}
-	if utf8.Valid(b) {
+	if valid == 1 || valid == -1 && utf8.Valid(b) {
 		return Result{Enc: UTF8, From: FromDetected}
 	}
 	return detect(b)
+}
+
+func btoi(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // labels maps the WHATWG Encoding standard's labels of the encodings
