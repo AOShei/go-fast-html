@@ -93,7 +93,7 @@ func TestTableWideSpans(t *testing.T) {
 }
 
 func TestDecodeBudget(t *testing.T) {
-	src := "<p>" + strings.Repeat("\xE9", 1000) // windows-1252: two bytes a character
+	src := `<meta charset="windows-1252"><p>` + strings.Repeat("\xE9", 1000) // two bytes a character
 	doc := extract(t, src, &gofastcore.Options{Limits: gofastcore.Limits{MaxDecodedBytes: 500}})
 	if !doc.Parts[0].Has(gofastcore.WarnLimitExceeded) {
 		t.Fatal("no limit.exceeded")

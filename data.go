@@ -35,8 +35,8 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}
 	enc := charset.SniffText(src, e.Charset)
-	if enc.Transport != "" {
-		t.transport = blocksLabel(enc.Transport)
+	if err := t.sniffed(&enc, false); err != nil {
+		return nil, err
 	}
 	decoded, m, invalid, cut := charset.Decode(src, enc, max(decode.Left(), 0))
 	decode.Take(int64(len(decoded)))

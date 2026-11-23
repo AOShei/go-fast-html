@@ -66,7 +66,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		delim    = flags.String("delimiter", "", "the delimiter of csv and tsv input: one character, or \\t or tab for tab (default: a sep= first line, else tab for tsv, else sniffed for csv); a sep= first line overrides it")
 		noQuotes = flags.Bool("no-quotes", false, "read csv and tsv input with no quoting: a quote is a character like any other, and fields and rows end only at the delimiter and line ends")
 		header   = flags.Bool("header", false, "the first row of csv and tsv input is a header row, as the MIME parameter header=present declares")
-		cs       = flags.String("charset", "", "the encoding of every input, as a MIME charset label gives it (windows-1251, shift_jis); a byte order mark overrides it")
+		cs       = flags.String("charset", "", "the encoding of every input, as a MIME charset label gives it (windows-1251, shift_jis); a byte order mark overrides it. Give it for text that declares no encoding and whose encoding is not recognised")
 		parts    = flags.String("parts", "", "chapters of an EPUB to read, by number: 3, or 2-5")
 		members  = flags.Int("max-archive-members", 0, "files in an EPUB's archive (0: the default, 100,000; -1: no limit)")
 		output   = flags.String("o", "", "write to this file instead of standard output")

@@ -47,17 +47,28 @@ type lazyTable struct {
 	t     *dbcs
 }
 
-var dbcsTables = map[int]*lazyTable{
-	932: {text: &cp932Text},
-	936: {text: &cp936Text},
-	949: {text: &cp949Text},
-	950: {text: &cp950Text, extra: &big5HKSCSText},
-}
+// The four tables, found by a switch rather than a map: the lookup is
+// made for every character decoded.
+var (
+	table932 = lazyTable{text: &cp932Text}
+	table936 = lazyTable{text: &cp936Text}
+	table949 = lazyTable{text: &cp949Text}
+	table950 = lazyTable{text: &cp950Text, extra: &big5HKSCSText}
+)
 
 // dbcsTable returns the parsed table of code page cp, or nil.
 func dbcsTable(cp int) *dbcs {
-	l, ok := dbcsTables[cp]
-	if !ok {
+	var l *lazyTable
+	switch cp {
+	case 932:
+		l = &table932
+	case 936:
+		l = &table936
+	case 949:
+		l = &table949
+	case 950:
+		l = &table950
+	default:
 		return nil
 	}
 	l.once.Do(func() {
