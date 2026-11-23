@@ -6,29 +6,25 @@ go-fast-html is measured against the HTML text extractors data and AI pipelines 
 
 On 9,835 real pages from Common Crawl (1.45 GiB):
 
-- **Speed.** With one worker, go-fast-html reads them in 10.3 s.
-  - The two parsers written in C and C++ on the lexbor engine are faster: selectolax (3.7 s) and resiliparse (7.2 s).
-  - Every other tool is slower: the Rust `html2text` crate 1.4 times, inscriptis 3 times, BeautifulSoup 7 times, trafilatura 14 times, markitdown 23 times.
-  - With 24 workers the order is the same, except that the Rust `html2text` crate (1.3 s) passes go-fast-html (2.1 s).
-  - go-fast-html does more per page than the lexbor tools: block structure, tables, links, declared display, locations, metadata, and scripts and comments kept as stored data. Even so, it is behind them, and closing that gap is open work (below).
-- **The slowest page.** go-fast-html's slowest page took 33 ms with one worker. Every other tool had a page between 99 ms and 2 s. In a batch, this is what decides whether a worker stalls.
-- **Memory.** With one worker go-fast-html peaks at 53 MB, the least but for htmd (49 MB). With 24 workers it uses 264 MB, against 0.4 to 4.5 GB for the others.
+- **Speed.** With one worker, go-fast-html reads them in 5.4 s.
+  - selectolax, a parser written in C on the lexbor engine, is faster (3.8 s).
+  - Every other tool is slower: resiliparse (lexbor, C++) 1.4 times, the Rust `html2text` crate 2.8 times, inscriptis 6 times, BeautifulSoup 13 times, trafilatura 27 times, markitdown 43 times.
+  - With 24 workers go-fast-html takes 0.80 s: selectolax is faster (0.48 s), resiliparse about level (0.84 s), and every other tool slower, the Rust `html2text` crate 1.7 times.
+  - go-fast-html does more per page than selectolax: block structure, tables, links, declared display, locations, metadata, and scripts and comments kept as stored data.
+- **The slowest page.** go-fast-html's slowest page took 19 ms with one worker. Every other tool had a page between 89 ms and 2 s. In a batch, this is what decides whether a worker stalls.
+- **Memory.** With one worker go-fast-html peaks at 62 MB, with selectolax (64 MB) and htmd (50 MB) the least. With 24 workers it uses 320 MB, against 0.4 to 4.5 GB for the others. Go's garbage collector can trade memory for speed (`GOGC`, see the library's README); the tables use Go's default.
 - **Accuracy.** Measured against the text Chromium shows:
-  - Rendered as a browser does, go-fast-html has the highest F1 of all tools: 0.964, against inscriptis 0.956 and selectolax 0.929.
-  - Its `Text()` scores lower (0.873) only because it keeps what a browser does not draw: HTML comments, `title` and `aria-label` text, text the page declares hidden, and images' alt text. That is the series' rule "preserve content", and each of these carries its reason in the output. Its recall, 0.992, is the highest.
+  - Rendered as a browser does, go-fast-html has the highest F1 of all tools: 0.966, against inscriptis 0.956 and selectolax 0.929.
+  - Its `Text()` scores lower (0.875) only because it keeps what a browser does not draw: HTML comments, `title` and `aria-label` text, text the page declares hidden, and images' alt text. That is the series' rule "preserve content", and each of these carries its reason in the output. Its recall, 0.995, is the highest.
   - "What a browser shows" is `bench/gohtml` with `GOHTML_VISIBLE=1`: the body's blocks without stored data, declared-hidden blocks, attribute notes or images.
   - The Markdown converters (markitdown, html2text, htmd) score low on precision because they write every link's address into the text.
   - trafilatura extracts only the main content, by design, so its recall is low. It is listed for its speed, not as a like-for-like comparison.
-- **Failures.** go-fast-html refused 10 pages with `ErrEncodingUnknown`: no declaration it reads, not UTF-8, no encoding certain. The other tools read every page, in an encoding they guessed. Given each page's HTTP `charset` as `Extractor.Charset`, as a crawler passes it on, 7 are refused:
-  - 2 declare their encoding in a `<meta>` past the first 1,024 bytes the prescan reads (windows-1250, and EUC-JP, which go-fast-html does not decode). The HTML standard has a parser that meets such a `<meta>` switch to it ("change the encoding"); go-fast-html does not yet.
-  - 2 are declared by HTTP in encodings go-fast-html does not decode: KOI8-R and ISO-8859-2.
-  - 3 declare nothing, and no encoding is certain from their bytes.
+- **Failures.** go-fast-html refused 7 pages with `ErrEncodingUnknown`: no declaration it reads, not UTF-8, no encoding certain. The other tools read every page, in an encoding they guessed. Given each page's HTTP `charset` as `Extractor.Charset`, as a crawler passes it on, 3 are refused: they declare nothing, and no encoding is certain from their bytes.
 
-## Open work this found
+## History
 
-1. **Speed against lexbor.** go-fast-html is 2.8 times slower than selectolax. On one core the time is spread over the tokenizer (31%), the walk that makes blocks (32%) and the text buffer (15%), with allocation throughout: no single hot spot.
-2. **A `<meta charset>` past the first 1,024 bytes**, as the HTML standard's "change the encoding" has it.
-3. **More encodings:** EUC-JP, ISO-2022-JP, GB18030, KOI8-R, KOI8-U and ISO-8859-2 to 16. go-fast-email already has tables for the first three.
+- v0.3.0: 10.3 s with one worker, 2.08 s with 24; 10 pages refused (7 with the HTTP charset).
+- v0.4.0: the `<meta charset>` up to the first MiB when the page is not UTF-8, and EUC-JP, GB18030, KOI8-R and -U, IBM866, x-mac-cyrillic and ISO-8859-2 to 16 (#22); a lexer that does not copy the page, and blocks of nodes (#23); memory reused from one page to the next (#24). Output of #23 and #24 byte-identical to that before them.
 
 ## Reproducing
 
@@ -63,4 +59,4 @@ python -I bench/score_text.py $DATA/reference $DATA/results/*-1 $DATA/results/go
 python -I bench/report.py $DATA > bench/comparison.md
 ```
 
-`run.log` here is the log of the run in `comparison.md`. `bench/gohtml` and `bench/rshtml` are modules of their own, so they are not part of the library's build.
+`run.log` here is the log of the run in `comparison.md`. `measure.py` waits before each run until the machine is quiet, and repeats a run during which other processes used more than a little CPU (`others_cpu_s` and `attempts` in each `measure.json`), so that a shared machine does not bias the times. `bench/gohtml` and `bench/rshtml` are modules of their own, so they are not part of the library's build.
