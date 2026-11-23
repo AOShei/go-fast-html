@@ -36,9 +36,9 @@ TEXTS = {
 }
 
 CODECS = {
- "ja": ["cp932", "euc_jp"], "zh": ["gbk"], "zh-tw": ["cp950"], "ko": ["cp949"],
- "ru": ["cp1251", "koi8_r", "cp866"], "uk": ["cp1251"], "bg": ["cp1251"], "sr": ["cp1251"],
- "el": ["cp1253"], "he": ["cp1255"], "cs": ["cp1250"], "pl": ["cp1250"], "hu": ["cp1250"],
+ "ja": ["cp932", "euc_jp"], "zh": ["gbk", "gb18030"], "zh-tw": ["cp950"], "ko": ["cp949"],
+ "ru": ["cp1251", "koi8_r", "cp866", "iso8859_5"], "uk": ["cp1251", "koi8_u"], "bg": ["cp1251"], "sr": ["cp1251"],
+ "el": ["cp1253", "iso8859_7"], "he": ["cp1255"], "cs": ["cp1250", "iso8859_2"], "pl": ["cp1250", "iso8859_2"], "hu": ["cp1250"],
  "tr": ["cp1254"], "ro": ["cp1250"], "vi": ["cp1258"],
  "fr": ["cp1252"], "de": ["cp1252"], "es": ["cp1252"], "pt": ["cp1252"], "it": ["cp1252"], "da": ["cp1252"],
 }
@@ -61,8 +61,13 @@ def encode(text, codec):
 
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
+orig = os.path.join(os.path.dirname(os.path.abspath(out)), "text")
+os.makedirs(orig, exist_ok=True)
 for lang, text in TEXTS.items():
     text = "\n\n".join([text] * 3)
+    # The text itself, in UTF-8, beside: what each file decodes to.
+    with open(os.path.join(orig, lang + ".txt"), "w", encoding="utf-8") as f:
+        f.write(text)
     for codec in CODECS[lang] + EXTRA.get(lang, []):
         with open(os.path.join(out, f"{lang}.{codec}"), "wb") as f:
             f.write(encode(text, codec))
