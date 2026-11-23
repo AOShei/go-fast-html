@@ -3,6 +3,7 @@ package blocks
 import (
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/dom"
+	"strings"
 )
 
 // The note an attribute's text becomes says so in Attrs: type
@@ -64,7 +65,7 @@ func (w *walker) attrNotes(n *dom.Node) {
 		}
 		w.res.Controls += ctl
 		w.later(gofastcore.Block{Kind: gofastcore.KindNote, Text: v,
-			Attrs: map[string]string{gofastcore.AttrNoteType: NoteAttribute, AttrAttribute: a.Name},
+			Attrs: map[string]string{gofastcore.AttrNoteType: NoteAttribute, AttrAttribute: strings.Clone(a.Name)},
 			Loc:   w.loc(a.ValStart, a.ValEnd, w.anchorOf(n))})
 	}
 }

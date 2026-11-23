@@ -78,6 +78,7 @@ type afeItem struct {
 
 type builder struct {
 	lx       *lexer.Lexer
+	nodes    []Node // a block of nodes not yet used; see node
 	root     *Node
 	stack    []entry
 	afe      []afeItem
@@ -147,7 +148,7 @@ func (b *builder) token(t *lexer.Token) {
 			return
 		}
 		top := b.top()
-		n := &Node{Type: CommentNode, Text: []byte(t.Data), Start: t.Start, End: t.End, Display: top.st.display()}
+		n := b.node(Node{Type: CommentNode, Text: t.Data, Start: t.Start, End: t.End, Display: top.st.display()})
 		b.attach(top.box, n, nil)
 	case lexer.StartTag:
 		if b.inForeign() {
@@ -206,11 +207,11 @@ func (b *builder) text(t *lexer.Token) {
 		prev = ref.Prev
 	}
 	if prev != nil && prev.Type == TextNode && prev.Display == d && prev.WS == st.ws && prev.End == t.Start {
-		prev.Text = append(prev.Text, data...)
+		prev.Text += data
 		prev.End = t.End
 		return
 	}
-	n := &Node{Type: TextNode, Text: []byte(data), Start: t.Start, End: t.End, Display: d, WS: st.ws}
+	n := b.node(Node{Type: TextNode, Text: data, Start: t.Start, End: t.End, Display: d, WS: st.ws})
 	b.attach(parent, n, ref)
 }
 
@@ -245,7 +246,7 @@ func (b *builder) insert(t *lexer.Token, ns NS, void bool) *Node {
 
 func (b *builder) insertAt(t *lexer.Token, ns NS, void bool, parent, ref *Node, pst *state, attach bool) *Node {
 	st := pst.child(t.Name, ns, t.Attrs, b.style(t.Attrs))
-	n := &Node{Type: ElementNode, Name: t.Name, NS: ns, Attrs: t.Attrs, Start: t.Start, End: t.End, Display: st.display(), WS: st.ws}
+	n := b.node(Node{Type: ElementNode, Name: t.Name, NS: ns, Attrs: t.Attrs, Start: t.Start, End: t.End, Display: st.display(), WS: st.ws})
 	box := parent
 	if attach {
 		b.attach(parent, n, ref)
@@ -316,35 +317,66 @@ func (b *builder) popTo(i int) {
 // find returns the stack index of the nearest open HTML element named
 // name, looking no further than a boundary of the given scope; -1 if
 // there is none.
-func (b *builder) find(name string, scope map[string]bool) int {
+func (b *builder) find(name string, sc scope) int {
 	for i := len(b.stack) - 1; i > 0 && i >= len(b.stack)-walkLimit; i-- {
 		n := b.stack[i].node
 		if n.NS == HTML && n.Name == name {
 			return i
 		}
-		if scope != nil && isBoundary(n, scope) {
+		if sc != 0 && isBoundary(n, sc) {
 			return -1
 		}
 	}
 	return -1
 }
 
-func isBoundary(n *Node, scope map[string]bool) bool {
+// scope is a set of the scopes of the HTML standard's "has an element in
+// scope" (a bit each), for which an element is a boundary.
+type scope uint8
+
+const (
+	defaultScope scope = 1 << iota
+	listItemScope
+	buttonScope
+	tableScope
+	foreignBoundary // a MathML or SVG element that bounds every scope but the table's
+	scopesKnown     // the bits of a node are computed
+)
+
+// isBoundary reports whether n bounds scope sc. A node's scopes are
+// computed on its first check and kept.
+func isBoundary(n *Node, sc scope) bool {
+	if n.scopes == 0 {
+		n.scopes = scopesOf(n) | scopesKnown
+	}
+	return n.scopes&sc != 0
+}
+
+func scopesOf(n *Node) scope {
 	switch n.NS {
 	case HTML:
-		return scope[n.Name]
+		switch n.Name {
+		case "applet", "caption", "td", "th", "marquee", "object":
+			return defaultScope | listItemScope | buttonScope
+		case "html", "table", "template":
+			return defaultScope | listItemScope | buttonScope | tableScope
+		case "ol", "ul":
+			return listItemScope
+		case "button":
+			return buttonScope
+		}
 	case MathML:
 		switch n.Name {
 		case "mi", "mo", "mn", "ms", "mtext", "annotation-xml":
-			return true
+			return defaultScope | listItemScope | buttonScope | tableScope | foreignBoundary
 		}
 	case SVG:
 		switch n.Name {
 		case "foreignobject", "desc", "title":
-			return true
+			return defaultScope | listItemScope | buttonScope | tableScope | foreignBoundary
 		}
 	}
-	return false
+	return 0
 }
 
 func (b *builder) closeP() {
@@ -354,7 +386,7 @@ func (b *builder) closeP() {
 }
 
 func (b *builder) closeHead() {
-	if i := b.find("head", nil); i >= 0 {
+	if i := b.find("head", 0); i >= 0 {
 		b.popTo(i)
 	}
 }
@@ -872,7 +904,7 @@ func tableContent(t *lexer.Token) bool {
 
 func isSpecial(n *Node) bool {
 	if n.NS != HTML {
-		return isBoundary(n, nil)
+		return isBoundary(n, foreignBoundary)
 	}
 	return special[n.Name]
 }
@@ -909,11 +941,6 @@ func set(names ...string) map[string]bool {
 }
 
 var (
-	defaultScope  = set("applet", "caption", "html", "table", "td", "th", "marquee", "object", "template")
-	listItemScope = set("applet", "caption", "html", "table", "td", "th", "marquee", "object", "template", "ol", "ul")
-	buttonScope   = set("applet", "caption", "html", "table", "td", "th", "marquee", "object", "template", "button")
-	tableScope    = set("html", "table", "template")
-
 	pushesMarker = set("applet", "marquee", "object", "template", "td", "th", "caption")
 
 	headings = set("h1", "h2", "h3", "h4", "h5", "h6")
@@ -950,3 +977,19 @@ var (
 		"li", "listing", "menu", "meta", "nobr", "ol", "p", "pre", "ruby", "s", "small", "span",
 		"strong", "strike", "sub", "sup", "table", "tt", "u", "ul", "var")
 )
+
+// nodeBlock is how many nodes are allocated at once: one allocation for
+// many nodes, which all live as long as the tree. 224 nodes of 144 bytes
+// stay under 32 KiB, above which the runtime allocates more slowly.
+const nodeBlock = 224
+
+// node returns a new node with the value v, from the current block.
+func (b *builder) node(v Node) *Node {
+	if len(b.nodes) == 0 {
+		b.nodes = make([]Node, nodeBlock)
+	}
+	n := &b.nodes[0]
+	*n = v
+	b.nodes = b.nodes[1:]
+	return n
+}

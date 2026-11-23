@@ -164,6 +164,11 @@ func (w *walker) newBuf() *buf {
 // Walk produces the blocks of the tree under root.
 func Walk(ctx context.Context, root *dom.Node, cfg Config) (*Result, error) {
 	w := &walker{ctx: ctx, cfg: cfg, res: &Result{}}
+	// About one block for each KiB of the page (the median page of a web
+	// crawl has one for each 500 bytes): fewer copies as the list grows.
+	if root.LastChild != nil {
+		w.res.Blocks = make([]gofastcore.Block, 0, min(max(root.LastChild.End/1024, 8), 8192))
+	}
 	w.buf = w.newBuf()
 	w.children(root)
 	if err := ctx.Err(); err != nil {
@@ -879,14 +884,14 @@ func (w *walker) input(n *dom.Node) {
 	case "image":
 		w.srcRef(n, "src")
 		if alt, _ := n.Attr("alt"); alt != "" {
-			w.buf.add([]byte(alt), dom.Normal, n.Display, false)
+			w.buf.add(alt, dom.Normal, n.Display, false)
 		}
 		return
 	case "submit", "button", "reset":
 		// The value is the button's label, shown where it stands.
 		if v, ok := n.Attr("value"); ok {
 			w.buf.pending = true
-			w.buf.add([]byte(v), dom.Normal, n.Display, false)
+			w.buf.add(v, dom.Normal, n.Display, false)
 			w.buf.pending = true
 		}
 		return
@@ -928,7 +933,7 @@ func (w *walker) input(n *dom.Node) {
 // control.
 func (w *walker) field(n *dom.Node, value string, ws dom.WS) {
 	b := w.newBuf()
-	b.add([]byte(value), ws, n.Display, false)
+	b.add(value, ws, n.Display, false)
 	text, display, spans := b.finish()
 	if text == "" {
 		return

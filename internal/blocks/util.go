@@ -253,7 +253,7 @@ func cleanProse(s string, collapse bool) (string, int) {
 	if !collapse {
 		ws = dom.PreLine
 	}
-	b.add([]byte(s), ws, 0, false)
+	b.add(s, ws, 0, false)
 	t, _, _ := b.finish()
 	return t, n
 }
@@ -261,8 +261,13 @@ func cleanProse(s string, collapse bool) (string, int) {
 // cleanRef drops control characters and surrounding white space from an
 // address or name, which is otherwise left as the source has it. What it
 // drops is not counted in Result.Controls: an address or a name
-// identifies something, and is not text.
+// identifies something, and is not text. The result is a copy: the
+// strings of the tree share the memory of the whole page, which a
+// document kept for long must not hold.
 func cleanRef(s string) string {
+	if !hasControl(s) {
+		return strings.Clone(strings.TrimSpace(s))
+	}
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return -1
@@ -345,6 +350,9 @@ func hasScheme(s, scheme string) bool {
 // isScriptURL reports a javascript: or vbscript: address. Browsers strip
 // tabs and newlines from addresses before reading the scheme.
 func isScriptURL(s string) bool {
+	if !strings.ContainsAny(s, "\t\n\r") {
+		return hasScheme(s, "javascript") || hasScheme(s, "vbscript")
+	}
 	s = strings.Map(func(r rune) rune {
 		if r == '\t' || r == '\n' || r == '\r' {
 			return -1
@@ -473,4 +481,15 @@ var inlineStyle = map[string]gofastcore.Style{
 	"code": gofastcore.StyleCode, "kbd": gofastcore.StyleCode, "samp": gofastcore.StyleCode,
 	"tt":  gofastcore.StyleCode,
 	"sub": gofastcore.StyleSub, "sup": gofastcore.StyleSuper,
+}
+
+// hasControl reports whether s holds a control character (Unicode Cc:
+// a byte below 0x20, 0x7F, or C2 80 to C2 9F).
+func hasControl(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == 0x7F || c == 0xC2 && i+1 < len(s) && s[i+1] >= 0x80 && s[i+1] <= 0x9F {
+			return true
+		}
+	}
+	return false
 }

@@ -127,11 +127,24 @@ func (b *buf) clip() {
 // and its ligatures written as letters. Format characters (zero-width
 // characters, bidirectional controls, tag characters) and variation
 // selectors are kept as they are.
-func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Display, verbatim bool) {
+//
+// Runs of characters that need nothing done are copied whole (runEnd);
+// the rest is read a character at a time.
+func (b *buf) add(t string, ws dom.WS, h gofastcore.Display, verbatim bool) {
 	b.from, b.cur = len(b.b), h
 	defer func() { b.mark(b.from, h) }()
 	keep := verbatim || ws == dom.Pre
 	for i := 0; i < len(t); {
+		if j := runEnd(t, i, keep, verbatim); j > i {
+			if !verbatim {
+				b.space()
+			}
+			b.b = append(b.b, t[i:j]...)
+			i = j
+			if i >= len(t) {
+				break
+			}
+		}
 		c := t[i]
 		if c < utf8.RuneSelf {
 			i++
@@ -169,7 +182,7 @@ func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Display, verbatim bool) {
 			b.b = append(b.b, c)
 			continue
 		}
-		r, size := utf8.DecodeRune(t[i:])
+		r, size := utf8.DecodeRuneInString(t[i:])
 		chunk := t[i : i+size]
 		i += size
 		if unicode.IsControl(r) {
@@ -186,6 +199,56 @@ func (b *buf) add(t []byte, ws dom.WS, h gofastcore.Display, verbatim bool) {
 		b.b = append(b.b, chunk...)
 	}
 }
+
+// runEnd returns where the run of bytes from i that add copies as they
+// are ends: not white space (but tab and line feed where white space is
+// kept), not CR or another control character, not a C1 control (C2 80 to
+// C2 9F) and, but in verbatim text, not a ligature (EF AC 80 to EF AC 86).
+func runEnd(t string, i int, keep, verbatim bool) int {
+	for i < len(t) {
+		k := runClass[t[i]]
+		if k == 0 {
+			i++
+			continue
+		}
+		switch k {
+		case runKept:
+			if !keep {
+				return i
+			}
+		case runC2:
+			if i+1 < len(t) && t[i+1] >= 0x80 && t[i+1] <= 0x9F {
+				return i
+			}
+		case runEF:
+			if !verbatim && i+2 < len(t) && t[i+1] == 0xAC && t[i+2] <= 0x86 {
+				return i
+			}
+		default:
+			return i
+		}
+		i++
+	}
+	return i
+}
+
+// The classes of bytes for runEnd: 0, a byte of a run.
+const (
+	runStop = 1 + iota // never in a run: a control, CR, form feed
+	runKept            // space, tab, line feed: in a run where white space is kept
+	runC2              // the lead byte of a C1 control
+	runEF              // the lead byte of a ligature
+)
+
+var runClass = func() (t [256]uint8) {
+	for c := range 0x20 {
+		t[c] = runStop
+	}
+	t[0x7F] = runStop
+	t[' '], t['\t'], t['\n'] = runKept, runKept, runKept
+	t[0xC2], t[0xEF] = runC2, runEF
+	return t
+}()
 
 // mark records that the text from offset from to the end has reasons h.
 func (b *buf) mark(from int, h gofastcore.Display) {

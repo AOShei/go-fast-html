@@ -61,7 +61,7 @@ type Node struct {
 	NS    NS
 	Attrs []lexer.Attr
 	// Text is the text of a text or comment node.
-	Text []byte
+	Text string
 	// Start and End are byte offsets of the node in the decoded input,
 	// from its start tag to the end of its end tag or of the last thing
 	// in it.
@@ -74,8 +74,9 @@ type Node struct {
 
 	Parent, FirstChild, LastChild, Prev, Next *Node
 
-	depth int32
-	open  bool
+	depth  int32
+	open   bool
+	scopes scope
 }
 
 // Depth returns how deeply the node is nested in its tree.

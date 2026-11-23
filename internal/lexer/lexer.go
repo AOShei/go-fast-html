@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/AOShei/go-fast-html/internal/entity"
 )
@@ -71,6 +72,9 @@ const (
 // Lexer tokenizes one document.
 type Lexer struct {
 	src    []byte
+	str    string // src as a string: tokens that need no decoding are slices of it
+	attrs  []Attr // the attributes of the tag being read
+	block  []Attr // room for the attributes of tags to come; see keepAttrs
 	pos    int
 	raw    Raw
 	rawTag string
@@ -80,8 +84,14 @@ type Lexer struct {
 	sb    []byte
 }
 
-// New returns a lexer over src, which must be UTF-8.
-func New(src []byte) *Lexer { return &Lexer{src: src} }
+// New returns a lexer over src, which must be UTF-8 and must not be
+// changed while the lexer, its tokens or anything made of them are in
+// use: the strings of tokens that need no decoding (text, names, values)
+// share src's memory instead of copying it. What is kept past the
+// extraction of a document (the Document's strings) is copied first.
+func New(src []byte) *Lexer {
+	return &Lexer{src: src, str: unsafe.String(unsafe.SliceData(src), len(src))}
+}
 
 // SetRaw switches the lexer to a text state that ends at the end tag of
 // tag (lowercase); Data switches back.
@@ -103,7 +113,7 @@ func (l *Lexer) Next() Token {
 	case Plaintext:
 		start := l.pos
 		l.pos = len(l.src)
-		return Token{Kind: Text, Data: string(l.src[start:]), Start: start, End: l.pos}
+		return Token{Kind: Text, Data: l.str[start:], Start: start, End: l.pos}
 	}
 	if l.src[l.pos] == '<' {
 		if t, ok := l.markup(); ok {
@@ -116,7 +126,30 @@ func (l *Lexer) Next() Token {
 // text reads character data up to the next '<' that may open markup.
 func (l *Lexer) text() Token {
 	start := l.pos
-	l.sb = l.sb[:0]
+	// Text with no character reference before the markup that ends it is
+	// a slice of the input.
+	for {
+		rest := l.src[l.pos:]
+		lt := bytes.IndexByte(rest, '<')
+		upto := rest
+		if lt >= 0 {
+			upto = rest[:lt]
+		}
+		if amp := bytes.IndexByte(upto, '&'); amp >= 0 {
+			l.pos += amp
+			break // a reference: decoded below
+		}
+		if lt < 0 {
+			l.pos = len(l.src)
+			return Token{Kind: Text, Data: l.str[start:], Start: start, End: l.pos}
+		}
+		l.pos += lt
+		if l.pos > start && l.opensMarkup() {
+			return Token{Kind: Text, Data: l.str[start:l.pos], Start: start, End: l.pos}
+		}
+		l.pos++ // a '<' that is text
+	}
+	l.sb = append(l.sb[:0], l.src[start:l.pos]...)
 	for l.pos < len(l.src) {
 		c := l.src[l.pos]
 		if c == '<' && l.pos > start && l.opensMarkup() {
@@ -186,10 +219,10 @@ func (l *Lexer) markup() (Token, bool) {
 			end := bytes.Index(s[body:], []byte("]]>"))
 			t := Token{Kind: Text, Start: p}
 			if end < 0 {
-				t.Data = string(s[body:])
+				t.Data = l.str[body:]
 				l.pos = len(s)
 			} else {
-				t.Data = string(s[body : body+end])
+				t.Data = l.str[body : body+end]
 				l.pos = body + end + 3
 			}
 			t.End = l.pos
@@ -227,7 +260,7 @@ func (l *Lexer) comment(start, body int) Token {
 				break
 			}
 		}
-		t.Data = string(s[body:end])
+		t.Data = l.str[body:end]
 		l.pos = after
 	}
 	t.End = l.pos
@@ -240,10 +273,10 @@ func (l *Lexer) bogusComment(start, body int) Token {
 	end := bytes.IndexByte(s[body:], '>')
 	t := Token{Kind: Comment, Start: start}
 	if end < 0 {
-		t.Data = string(s[body:])
+		t.Data = l.str[body:]
 		l.pos = len(s)
 	} else {
-		t.Data = string(s[body : body+end])
+		t.Data = l.str[body : body+end]
 		l.pos = body + end + 1
 	}
 	t.End = l.pos
@@ -259,7 +292,8 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 	for i < len(s) && !isSpace(s[i]) && s[i] != '/' && s[i] != '>' {
 		i++
 	}
-	t.Name = lowerName(s[p:i])
+	t.Name = l.lowerName(p, i)
+	l.attrs = l.attrs[:0]
 	var seen map[string]bool // the names so far, once there are many
 	for {
 		// Before attribute name.
@@ -278,7 +312,9 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 			l.pos = i + 1
 			t.End = l.pos
 			if kind == EndTag {
-				t.Attrs, t.SelfClosing = nil, false
+				t.SelfClosing = false
+			} else {
+				t.Attrs = l.keepAttrs()
 			}
 			return t
 		}
@@ -288,7 +324,7 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 		for i < len(s) && !isSpace(s[i]) && s[i] != '/' && s[i] != '>' && s[i] != '=' {
 			i++
 		}
-		name := lowerName(s[ns:i])
+		name := l.lowerName(ns, i)
 		for i < len(s) && isSpace(s[i]) {
 			i++
 		}
@@ -312,9 +348,9 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 			i = l.pos
 		}
 		a := Attr{Name: name, Value: value, ValStart: vs, ValEnd: max(ve, vs)}
-		if len(t.Attrs) == 16 && seen == nil {
+		if len(l.attrs) == 16 && seen == nil {
 			seen = make(map[string]bool, 32)
-			for _, a := range t.Attrs {
+			for _, a := range l.attrs {
 				seen[a.Name] = true
 			}
 		}
@@ -322,10 +358,10 @@ func (l *Lexer) tag(kind Kind, p int) Token {
 		case seen != nil:
 			if !seen[name] {
 				seen[name] = true
-				t.Attrs = append(t.Attrs, a)
+				l.attrs = append(l.attrs, a)
 			}
-		case !hasAttr(t.Attrs, name):
-			t.Attrs = append(t.Attrs, a)
+		case !hasAttr(l.attrs, name):
+			l.attrs = append(l.attrs, a)
 		}
 	}
 }
@@ -339,6 +375,12 @@ func (l *Lexer) attrValue() string {
 	l.sb = l.sb[:0]
 	if q := s[l.pos]; q == '"' || q == '\'' {
 		l.pos++
+		// A value with no character reference is a slice of the input.
+		if end := bytes.IndexByte(s[l.pos:], q); end >= 0 && bytes.IndexByte(s[l.pos:l.pos+end], '&') < 0 {
+			v := l.str[l.pos : l.pos+end]
+			l.pos += end + 1
+			return v
+		}
 		for l.pos < len(s) && s[l.pos] != q {
 			if s[l.pos] == '&' {
 				l.pos++
@@ -431,7 +473,7 @@ func (l *Lexer) rawText(refs bool) Token {
 		}
 		t.Data = string(l.sb)
 	} else {
-		t.Data = string(l.src[start:end])
+		t.Data = l.str[start:end]
 	}
 	l.pos = end
 	l.raw = Data
@@ -530,7 +572,7 @@ scan:
 	if end == start {
 		return l.Next()
 	}
-	return Token{Kind: Text, Data: string(s[start:end]), Start: start, End: end}
+	return Token{Kind: Text, Data: l.str[start:end], Start: start, End: end}
 }
 
 // isScriptTag reports whether "script" followed by whitespace, '/' or '>'
@@ -547,6 +589,23 @@ func hasAttr(as []Attr, name string) bool {
 		}
 	}
 	return false
+}
+
+// lowerName returns src[from:to] with ASCII letters lowercased and a NUL
+// as U+FFFD: a slice of the input when it is so already.
+func (l *Lexer) lowerName(from, to int) string {
+	b := l.src[from:to]
+	plain := true
+	for _, c := range b {
+		if c >= 'A' && c <= 'Z' || c == 0 {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		return l.str[from:to]
+	}
+	return lowerName(b)
 }
 
 // lowerName lowercases ASCII letters; a NUL becomes U+FFFD.
@@ -578,4 +637,28 @@ func hexVal(c byte) byte {
 		return c - '0'
 	}
 	return c | 0x20 - 'a' + 10
+}
+
+// attrBlock is how many attributes are allocated at once.
+const attrBlock = 512
+
+// keepAttrs returns a copy of the attributes of the tag just read, nil if
+// there are none, in room shared with the tags to come: one allocation
+// for many tags. The copy's capacity is its length, so appending to it
+// does not write into the next tag's.
+func (l *Lexer) keepAttrs() []Attr {
+	n := len(l.attrs)
+	if n == 0 {
+		return nil
+	}
+	if n > attrBlock {
+		return append([]Attr(nil), l.attrs...)
+	}
+	if len(l.block) < n {
+		l.block = make([]Attr, attrBlock)
+	}
+	a := l.block[:n:n]
+	copy(a, l.attrs)
+	l.block = l.block[n:]
+	return a
 }
