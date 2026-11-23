@@ -133,6 +133,19 @@ type walker struct {
 	// longIDs holds the elements whose id was too long to be an anchor,
 	// to count each once.
 	longIDs map[*dom.Node]bool
+	// open holds the styled and linked inline elements being walked, for
+	// their spans: a block that ends inside one (a <p> in a <b>) takes the
+	// part of it read so far, and the next block goes on from its start.
+	open []openSpan
+}
+
+// openSpan is an inline element being walked: the buffer its text goes
+// to, where in it the element's text starts, and its style and link.
+type openSpan struct {
+	buf   *buf
+	start int
+	style gofastcore.Style
+	href  string
 }
 
 // Walk produces the blocks of the tree under root.
@@ -388,17 +401,36 @@ func (w *walker) inline(n *dom.Node, style gofastcore.Style) {
 			b.href = cleanRef(href)
 		}
 	}
+	if href != "" {
+		href = cleanRef(href)
+	}
 	start := len(b.b)
+	i := -1
+	if w.cfg.Spans && (style != 0 || href != "") {
+		w.open = append(w.open, openSpan{buf: b, start: start, style: style, href: href})
+		i = len(w.open) - 1
+	}
 	w.children(n)
 	b.cover(n.Start, n.End)
-	if !w.cfg.Spans || len(b.b) <= start {
+	if i < 0 {
+		return
+	}
+	start = w.open[i].start // 0 if a block ended inside n
+	w.open = w.open[:i]
+	b.addSpans(start, style, href)
+}
+
+// addSpans adds the spans of an inline element whose text starts at start
+// and runs to the end of the buffer.
+func (b *buf) addSpans(start int, style gofastcore.Style, href string) {
+	if len(b.b) <= start {
 		return
 	}
 	if style != 0 {
 		b.spans = append(b.spans, gofastcore.Span{Start: start, End: len(b.b), Style: style})
 	}
 	if href != "" {
-		b.spans = append(b.spans, gofastcore.Span{Start: start, End: len(b.b), Href: cleanRef(href)})
+		b.spans = append(b.spans, gofastcore.Span{Start: start, End: len(b.b), Href: href})
 	}
 }
 
@@ -427,6 +459,14 @@ func (w *walker) flush() {
 	if w.cell > 0 {
 		w.buf.softBreak()
 		return
+	}
+	// The inline elements the block ends inside: their part in it, and
+	// the rest in the next block, from its start.
+	for i := range w.open {
+		if o := &w.open[i]; o.buf == w.buf {
+			w.buf.addSpans(o.start, o.style, o.href)
+			o.start = 0
+		}
 	}
 	text, display, spans := w.buf.finish()
 	if text != "" {

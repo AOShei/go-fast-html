@@ -151,7 +151,13 @@ func TestDataBudget(t *testing.T) {
 
 // TestDataWorstCase reads inputs built to cost much for their size.
 func TestDataWorstCase(t *testing.T) {
+	// It is quadratic work these catch, which at a mebibyte is minutes:
+	// under the race detector, whose run on a small CI machine is slower
+	// by far more than raceSlowdown for a million blocks, that is enough.
 	n := 1 << 22
+	if raceSlowdown > 1 {
+		n = 1 << 20
+	}
 	if testing.Short() {
 		n = 1 << 18
 	}

@@ -29,6 +29,18 @@ named `.json`, `.jsonl`, `.ndjson`, `.geojson`, `.yaml` or `.yml`, which
   takes 48 ms (UTF-8: 31 ms); in UTF-16, 1.7 s and 57 ms. The output is
   the same, byte for byte.
 
+### Fixed
+
+- **Spans of an inline element that holds a block.** A link or style
+  around block content (`<a><h3>…</h3><p>…</p></a>`, the "card" of news
+  and government sites, or `<b>…<p>…</p>…</b>`) had a span only on its
+  last block, from the offset its text had in the block before: the part
+  in the earlier blocks had none, and the span could start in the middle
+  of a character, which `Validate` rejects. Each block now has the
+  element's span over its own part. On four pages of the public corpus,
+  191 links that were missing are given; no span moved or went. Output
+  without spans is unchanged.
+
 ## v0.2.0 (2026-11-22)
 
 Comma- and tab-separated values, and Jupyter notebooks. Output for the
