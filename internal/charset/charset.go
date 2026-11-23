@@ -5,16 +5,22 @@
 // The decision follows the WHATWG HTML standard's encoding sniffing, cut
 // down to what this library decodes: a byte order mark, then the
 // transport-layer encoding the caller gives (a MIME charset parameter),
-// then a <meta> declaration found by the prescan of the first 1024 bytes,
-// then UTF-8 if the whole input is valid UTF-8, otherwise windows-1252.
+// then a <meta> declaration found by the prescan of the first 1024 bytes
+// (of the first MiB when the input is not valid UTF-8, as the standard's
+// parser changes the encoding when it meets one later), then UTF-8 if the
+// whole input is valid UTF-8, otherwise the encoding recognised from the
+// bytes where one is certain (detect.go).
 //
 // Decoded are UTF-8, UTF-16LE, UTF-16BE, windows-1252 (which the Encoding
 // standard also uses for every ISO-8859-1 and US-ASCII label), the
 // single-byte windows-874, windows-1250 to windows-1258 and macintosh, and
 // the double-byte Shift_JIS, GBK, EUC-KR and Big5, read with Microsoft's
 // code pages 932, 936, 949 and 950 (tables.go, dbcs.go), Big5 with the
-// HKSCS pairs code page 950 leaves undefined (big5-hkscs.txt). A label
-// naming any other encoding is recorded and not used.
+// HKSCS pairs code page 950 leaves undefined (big5-hkscs.txt); the
+// standard's other single-byte encodings, IBM866, ISO-8859-2 to 16,
+// KOI8-R, KOI8-U and x-mac-cyrillic (singlebyte.go); and GB18030 and
+// EUC-JP (cjk.go). A label naming any other encoding (ISO-2022-JP,
+// UTF-7, ...) is recorded and not used.
 package charset
 
 import (
@@ -45,6 +51,24 @@ const (
 	GBK      // code page 936
 	EUCKR    // code page 949
 	Big5     // code page 950
+	IBM866
+	ISO8859_2
+	ISO8859_3
+	ISO8859_4
+	ISO8859_5
+	ISO8859_6
+	ISO8859_7
+	ISO8859_8
+	ISO8859_10
+	ISO8859_13
+	ISO8859_14
+	ISO8859_15
+	ISO8859_16
+	KOI8R
+	KOI8U
+	MacCyrillic
+	EUCJP
+	GB18030
 )
 
 var names = [...]string{
@@ -53,6 +77,11 @@ var names = [...]string{
 	Windows1253: "windows-1253", Windows1254: "windows-1254", Windows1255: "windows-1255",
 	Windows1256: "windows-1256", Windows1257: "windows-1257", Windows1258: "windows-1258",
 	Macintosh: "macintosh", ShiftJIS: "shift_jis", GBK: "gbk", EUCKR: "euc-kr", Big5: "big5",
+	IBM866: "ibm866", ISO8859_2: "iso-8859-2", ISO8859_3: "iso-8859-3", ISO8859_4: "iso-8859-4",
+	ISO8859_5: "iso-8859-5", ISO8859_6: "iso-8859-6", ISO8859_7: "iso-8859-7", ISO8859_8: "iso-8859-8",
+	ISO8859_10: "iso-8859-10", ISO8859_13: "iso-8859-13", ISO8859_14: "iso-8859-14", ISO8859_15: "iso-8859-15",
+	ISO8859_16: "iso-8859-16", KOI8R: "koi8-r", KOI8U: "koi8-u", MacCyrillic: "x-mac-cyrillic",
+	EUCJP: "euc-jp", GB18030: "gb18030",
 }
 
 func (e Encoding) String() string {
@@ -85,6 +114,38 @@ func (e Encoding) single() *[128]uint16 {
 		return &cp1258
 	case Macintosh:
 		return &macRoman
+	case IBM866:
+		return &ibm866
+	case ISO8859_2:
+		return &iso8859_2
+	case ISO8859_3:
+		return &iso8859_3
+	case ISO8859_4:
+		return &iso8859_4
+	case ISO8859_5:
+		return &iso8859_5
+	case ISO8859_6:
+		return &iso8859_6
+	case ISO8859_7:
+		return &iso8859_7
+	case ISO8859_8:
+		return &iso8859_8
+	case ISO8859_10:
+		return &iso8859_10
+	case ISO8859_13:
+		return &iso8859_13
+	case ISO8859_14:
+		return &iso8859_14
+	case ISO8859_15:
+		return &iso8859_15
+	case ISO8859_16:
+		return &iso8859_16
+	case KOI8R:
+		return &koi8r
+	case KOI8U:
+		return &koi8u
+	case MacCyrillic:
+		return &macCyrillic
 	}
 	return nil
 }
@@ -213,8 +274,19 @@ func Sniff(b []byte, tr string) Result {
 	return r
 }
 
+// latePrescan is how far a <meta> declaration is looked for when the
+// first 1024 bytes have none and the input is not UTF-8: the HTML
+// standard's parser changes the encoding when it meets one later ("change
+// the encoding"), and a declaration is taken over a set recognised from
+// the bytes.
+const latePrescan = 1 << 20
+
 func sniffMeta(b []byte) Result {
-	if label, ok := prescan(b[:min(len(b), 1024)]); ok {
+	label, ok := prescan(b[:min(len(b), 1024)])
+	if !ok && len(b) > 1024 && !utf8.Valid(b) {
+		label, ok = prescan(b[:min(len(b), latePrescan)])
+	}
+	if ok {
 		r := Result{From: FromMeta, Declared: label}
 		enc, known := Lookup(label)
 		switch {
@@ -295,6 +367,13 @@ func Lookup(label string) (Encoding, bool) {
 	return e, ok
 }
 
+// The labels of singlebyte.go and cjk.go are looked up with the others.
+func init() {
+	for l, e := range singleLabels {
+		labels[l] = e
+	}
+}
+
 // Map takes offsets in the decoded text back to offsets in the source.
 // It keeps a checkpoint every few kilobytes of decoded text and decodes
 // forward from the nearest one, so it costs little memory whatever the
@@ -372,6 +451,16 @@ func decodeAt(src []byte, s int, enc Encoding) (rune, int, bool) {
 	case UTF16LE, UTF16BE:
 		r, n := utf16At(src, s, enc == UTF16BE)
 		return r, n, r == utf8.RuneError
+	case EUCJP:
+		if b < 0x80 {
+			return rune(b), 1, false
+		}
+		return eucJPAt(src, s)
+	case GB18030:
+		if b < 0x80 {
+			return rune(b), 1, false
+		}
+		return gb18030At(src, s)
 	}
 	if b < 0x80 {
 		return rune(b), 1, false

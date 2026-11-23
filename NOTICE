@@ -58,3 +58,17 @@ internal/charset/common.go, gen/gen_common.py
 
 internal/charset/testdata/detect, gen/gen_detect.py
   Texts written for these tests.
+
+internal/charset/singlebyte.go, gen/gen_single.py
+  Generated from the index files of the WHATWG Encoding Standard
+  (https://encoding.spec.whatwg.org/, index-NAME.txt and encodings.json),
+  (c) WHATWG (Apple, Google, Mozilla, Microsoft), CC BY 4.0.
+
+internal/charset/gb18030-2.txt, gb18030-4.txt, jis0208.txt, jis0212.txt,
+gen/gen_cjk_extra.py, and the decoding in cjk.go
+  Copied from go-fast-email v0.2.0 (internal/charset/tables, cjk.go), same
+  author and licence, where they were generated from Python's gb18030 and
+  cp932 codecs.
+
+internal/charset/testdata/text
+  The texts of testdata/detect in UTF-8, written for these tests.

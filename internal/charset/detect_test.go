@@ -19,7 +19,8 @@ var detectWant = map[string]Encoding{
 // decodable are the codecs of testdata/detect this package decodes, to
 // compare the text when one is not decided.
 var decodable = map[string]Encoding{"cp1250": Windows1250, "cp1253": Windows1253, "cp1254": Windows1254,
-	"cp1255": Windows1255, "cp1258": Windows1258}
+	"cp1255": Windows1255, "cp1258": Windows1258, "gb18030": GB18030, "euc_jp": EUCJP, "koi8_r": KOI8R,
+	"koi8_u": KOI8U, "cp866": IBM866, "iso8859_2": ISO8859_2, "iso8859_5": ISO8859_5, "iso8859_7": ISO8859_7}
 
 func TestDetect(t *testing.T) {
 	files, err := filepath.Glob("testdata/detect/*")
@@ -109,5 +110,52 @@ func BenchmarkDetect(b *testing.B) {
 				detect(data)
 			}
 		})
+	}
+}
+
+// TestDecodeDeclared: each file of testdata/detect, decoded in the
+// encoding it was written in, gives back testdata/text/LANG.txt exactly,
+// and every offset maps back to the source in order.
+func TestDecodeDeclared(t *testing.T) {
+	codec := map[string]Encoding{
+		"cp932": ShiftJIS, "euc_jp": EUCJP, "gbk": GBK, "gb18030": GB18030, "cp950": Big5, "cp949": EUCKR,
+		"cp1250": Windows1250, "cp1251": Windows1251, "cp1252": Windows1252, "cp1253": Windows1253,
+		"cp1254": Windows1254, "cp1255": Windows1255, "koi8_r": KOI8R, "koi8_u": KOI8U, "cp866": IBM866,
+		"iso8859_2": ISO8859_2, "iso8859_5": ISO8859_5, "iso8859_7": ISO8859_7,
+		"utf_16_le": UTF16LE, "utf_16_be": UTF16BE,
+	}
+	seen := map[Encoding]bool{}
+	files, _ := filepath.Glob("testdata/detect/*")
+	for _, f := range files {
+		base := filepath.Base(f)
+		lang, c, _ := strings.Cut(base, ".")
+		enc, ok := codec[c]
+		if !ok {
+			continue
+		}
+		b, _ := os.ReadFile(f)
+		want, err := os.ReadFile("testdata/text/" + lang + ".txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, m, invalid, _ := Decode(b, Result{Enc: enc}, 1<<30)
+		if invalid != 0 || string(out) != string(want) {
+			t.Errorf("%s as %s: %d invalid; %.60q", base, enc, invalid, out)
+			continue
+		}
+		seen[enc] = true
+		prev := int64(-1)
+		for i := range string(out) {
+			s := m.Source(i)
+			if s <= prev || s >= int64(len(b)) {
+				t.Fatalf("%s: Source(%d) = %d after %d", base, i, s, prev)
+			}
+			prev = s
+		}
+	}
+	for _, e := range []Encoding{EUCJP, GB18030, KOI8R, KOI8U, IBM866, ISO8859_2, ISO8859_5, ISO8859_7} {
+		if !seen[e] {
+			t.Errorf("%s not tested", e)
+		}
 	}
 }

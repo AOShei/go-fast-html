@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+Encodings the benchmark against Common Crawl found missing, and a
+`<meta>` declaration past the first 1024 bytes.
+
+- **Decoded now:** GB18030 (with its four-byte sequences), EUC-JP,
+  IBM866, ISO-8859-2 to 8 (and 8-i), 10 and 13 to 16, KOI8-R, KOI8-U and
+  x-mac-cyrillic, with the WHATWG Encoding Standard's labels, as declared
+  in a `<meta>`, given as `Extractor.Charset`, or carried by a MIME
+  `charset`. They were read as windows-1252 with
+  `html.charset_unsupported`. The single-byte tables are generated from the
+  standard's index files (`internal/charset/gen/gen_single.py`); GB18030
+  and EUC-JP use go-fast-email's tables. ISO-2022-JP is still not decoded.
+- **A `<meta>` past the first 1024 bytes.** When those bytes declare no
+  encoding and the input is not valid UTF-8, a declaration in the first
+  MiB is used, as the HTML standard's parser changes the encoding when it
+  meets one, instead of the encoding recognised from the bytes.
+- On the 9,835 Common Crawl pages of `bench/`, 16 read differently: 9
+  pages in EUC-JP and 5 in ISO-8859-2 that were garbage, and 2 with a
+  late `<meta>`; the pages refused for their encoding go from 10 to 7, and
+  with each page's HTTP charset given, from 7 to 3 (pages that declare
+  nothing).
+- `TestDecodeDeclared` decodes texts written for the tests in each of
+  these encodings back to the original exactly; `FuzzDoubleByte` covers
+  GB18030 and EUC-JP.
+
 ## v0.3.0 (2026-11-23)
 
 JSON and YAML as text; text that declares no encoding read in the one

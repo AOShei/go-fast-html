@@ -23,10 +23,12 @@ func TestSniff(t *testing.T) {
 		{`<meta http-equiv="Content-Type" content="text/html; charset=utf-8">`, UTF8, FromMeta, "utf-8", false},
 		{`<meta content="text/html; charset=utf-8">`, UTF8, FromDetected, "", false},
 		{`<meta charset="utf-16">`, UTF8, FromMeta, "utf-16", false},
-		{`<meta charset="koi8-r">`, Windows1252, FromMeta, "koi8-r", true},
+		{`<meta charset="koi8-r">`, KOI8R, FromMeta, "koi8-r", false},
+		{`<meta charset="iso-2022-jp">`, Windows1252, FromMeta, "iso-2022-jp", true},
 		{`<meta charset="shift_jis">`, ShiftJIS, FromMeta, "shift_jis", false},
 		{`<meta charset="ISO-8859-9">`, Windows1254, FromMeta, "iso-8859-9", false},
-		{`<meta charset="gb18030">`, Windows1252, FromMeta, "gb18030", true},
+		{`<meta charset="gb18030">`, GB18030, FromMeta, "gb18030", false},
+		{`<meta charset="utf-7">`, Windows1252, FromMeta, "utf-7", true},
 		{`<!-- <meta charset="shift_jis"> --><p>caf` + "\xC3\xA9", UTF8, FromDetected, "", false},
 		{`<div title="<meta charset=koi8-r>">x`, UTF8, FromDetected, "", false},
 		{"<p>caf\xE9", Windows1252, FromDetected, "", false},
@@ -139,7 +141,7 @@ func TestTransport(t *testing.T) {
 		{"\xEF\xBB\xBF<p>x", "windows-1251", UTF8, FromBOM, ""},
 		{`<meta charset="shift_jis"><p>x`, "windows-1251", Windows1251, FromTransport, ""},
 		{`<meta charset="shift_jis"><p>x`, "x-unknown", ShiftJIS, FromMeta, "x-unknown"},
-		{"<p>x", "koi8-r", UTF8, FromDetected, "koi8-r"},
+		{"<p>x", "iso-2022-jp", UTF8, FromDetected, "iso-2022-jp"},
 		{"<p>x", "", UTF8, FromDetected, ""},
 	} {
 		r := Sniff([]byte(c.in), c.tr)
@@ -221,7 +223,7 @@ func FuzzDoubleByte(f *testing.F) {
 	f.Add([]byte("a\x93\xFA\x96\x7B\x8C\xEAb\xB1\x81"))
 	f.Add([]byte("\xC4\xE3\xBA\xC3\xFF\x80"))
 	f.Fuzz(func(t *testing.T, b []byte) {
-		for _, enc := range []Encoding{ShiftJIS, GBK, EUCKR, Big5} {
+		for _, enc := range []Encoding{ShiftJIS, GBK, EUCKR, Big5, EUCJP, GB18030} {
 			out, m, _, cut := Decode(b, Result{Enc: enc}, 1<<20)
 			if !utf8.Valid(out) {
 				t.Fatal("invalid UTF-8")
@@ -308,6 +310,34 @@ func BenchmarkSourceInOrder(b *testing.B) {
 		for i := 0; i < len(out); i += 40 {
 			m.Source(i)
 			m.Source(min(i+38, len(out)))
+		}
+	}
+}
+
+// TestLateMeta: a declaration past the first 1024 bytes is used when the
+// input is not UTF-8, and not when it is.
+func TestLateMeta(t *testing.T) {
+	pad := "<!-- " + strings.Repeat("x", 1100) + " -->"
+	r := Sniff([]byte(pad+"<meta charset=\"windows-1250\"><p>P\xf8\xedli\x9a"), "")
+	if r.Enc != Windows1250 || r.From != FromMeta || r.Guessed {
+		t.Errorf("not UTF-8: %+v", r)
+	}
+	r = Sniff([]byte(pad+"<meta charset=\"windows-1250\"><p>caf\xc3\xa9"), "")
+	if r.Enc != UTF8 {
+		t.Errorf("UTF-8: %+v", r)
+	}
+	r = Sniff([]byte(pad+"<meta charset=\"euc-jp\"><p>\xc6\xfc\xcb\xdc"), "")
+	if r.Enc != EUCJP || r.From != FromMeta {
+		t.Errorf("EUC-JP: %+v", r)
+	}
+}
+
+// TestTransportNewLabels: the labels of the encodings added with
+// singlebyte.go and cjk.go work as the transport-layer encoding too.
+func TestTransportNewLabels(t *testing.T) {
+	for label, want := range map[string]Encoding{"koi8-r": KOI8R, "ISO-8859-2": ISO8859_2, "euc-jp": EUCJP, "gb18030": GB18030, "cp866": IBM866} {
+		if r := SniffText([]byte("x"), label); r.Enc != want || r.From != FromTransport {
+			t.Errorf("%s: %+v", label, r)
 		}
 	}
 }

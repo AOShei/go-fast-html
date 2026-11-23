@@ -71,6 +71,11 @@ func dbcsTable(cp int) *dbcs {
 	default:
 		return nil
 	}
+	return l.get()
+}
+
+// get returns the parsed table, parsing it the first time.
+func (l *lazyTable) get() *dbcs {
 	l.once.Do(func() {
 		l.t = &dbcs{}
 		l.t.parse(*l.text)
