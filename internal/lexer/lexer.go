@@ -13,6 +13,7 @@ package lexer
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"unicode/utf8"
 	"unsafe"
 
@@ -72,9 +73,10 @@ const (
 // Lexer tokenizes one document.
 type Lexer struct {
 	src    []byte
-	str    string // src as a string: tokens that need no decoding are slices of it
-	attrs  []Attr // the attributes of the tag being read
-	block  []Attr // room for the attributes of tags to come; see keepAttrs
+	str    string    // src as a string: tokens that need no decoding are slices of it
+	attrs  []Attr    // the attributes of the tag being read
+	block  []Attr    // room for the attributes of tags to come; see keepAttrs
+	taken  []*[]Attr // the blocks taken from attrPool, for Release
 	pos    int
 	raw    Raw
 	rawTag string
@@ -655,10 +657,27 @@ func (l *Lexer) keepAttrs() []Attr {
 		return append([]Attr(nil), l.attrs...)
 	}
 	if len(l.block) < n {
-		l.block = make([]Attr, attrBlock)
+		p := attrPool.Get().(*[]Attr)
+		l.taken = append(l.taken, p)
+		l.block = *p
 	}
 	a := l.block[:n:n]
 	copy(a, l.attrs)
 	l.block = l.block[n:]
 	return a
+}
+
+// attrPool holds blocks of attributes for reuse from one document to the
+// next.
+var attrPool = sync.Pool{New: func() any { b := make([]Attr, attrBlock); return &b }}
+
+// Release gives the blocks of attributes back for the next document: the
+// attributes of every token the lexer returned are no longer valid. The
+// blocks are cleared, so that they keep nothing of this document.
+func (l *Lexer) Release() {
+	for _, p := range l.taken {
+		clear(*p)
+		attrPool.Put(p)
+	}
+	l.taken, l.block = nil, nil
 }

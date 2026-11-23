@@ -32,6 +32,25 @@ faster with one worker and 2 times with 24 on the 9,835 pages of
 
 ### Faster
 
+- **Memory reused from one document to the next.** The input buffer
+  (HTML, Markdown, text, CSV, TSV, JSON, YAML, notebooks) and the blocks of
+  the tree's nodes and attributes go back to pools when a page is done:
+  a batch allocates 0.97 GB for 3,000 pages instead of 2.3 GB, and with 24
+  workers reads the 9,835 pages of `bench/` in 0.82 s instead of 1.03 s,
+  for a peak of about 300 to 400 MB. Nothing of a document refers to that
+  memory: `TestInputReused` extracts a document of each format, then many
+  that reuse its memory, and checks it did not change (and fails if a
+  copy is taken out), also on eight goroutines at once. An EPUB's input is
+  not reused.
+- **Fewer passes over scripts, style sheets and attribute text:** a
+  `<script>` or `<style>` of one text with nothing to drop is copied once;
+  a `title`, `aria-label` or metadata value with nothing to collapse or
+  drop is not rebuilt.
+- **`GOGC` documented** (README): Go's default, 100, which the command
+  and the library keep, uses the least memory; `GOGC=200` reads the batch
+  with 24 workers in 0.70 s for a peak of about 730 MB, `GOGC=400` in
+  0.63 s for about 1 GB. The choice of memory for speed is the user's.
+
 - **The tokenizer copies nothing it need not.** Text, attribute values and
   names with no character reference are slices of the page, not copies,
   and a run of text is found with a byte search; the tree's text nodes are

@@ -3,6 +3,7 @@ package dom
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/AOShei/go-fast-html/internal/css"
 	"github.com/AOShei/go-fast-html/internal/lexer"
@@ -34,6 +35,7 @@ type Options struct {
 // Doc is a parsed document.
 type Doc struct {
 	Root *Node
+	b    *builder // for Release
 	// Limited reports that a nesting bound was reached and the structure
 	// below it was flattened.
 	Limited bool
@@ -78,7 +80,8 @@ type afeItem struct {
 
 type builder struct {
 	lx       *lexer.Lexer
-	nodes    []Node // a block of nodes not yet used; see node
+	nodes    []Node    // a block of nodes not yet used; see node
+	taken    []*[]Node // the blocks taken from nodePool, for Release
 	root     *Node
 	stack    []entry
 	afe      []afeItem
@@ -132,7 +135,7 @@ func Parse(ctx context.Context, src []byte, opt Options) (*Doc, error) {
 	}
 	b.lastEnd = len(src)
 	b.popTo(1)
-	return &Doc{Root: b.root, Limited: b.limited, Caps: b.caps}, nil
+	return &Doc{Root: b.root, Limited: b.limited, Caps: b.caps, b: b}, nil
 }
 
 func (b *builder) top() *entry { return &b.stack[len(b.stack)-1] }
@@ -986,10 +989,34 @@ const nodeBlock = 224
 // node returns a new node with the value v, from the current block.
 func (b *builder) node(v Node) *Node {
 	if len(b.nodes) == 0 {
-		b.nodes = make([]Node, nodeBlock)
+		p := nodePool.Get().(*[]Node)
+		b.taken = append(b.taken, p)
+		b.nodes = *p
 	}
 	n := &b.nodes[0]
 	*n = v
 	b.nodes = b.nodes[1:]
 	return n
+}
+
+// nodePool holds blocks of nodes for reuse from one document to the next.
+var nodePool = sync.Pool{New: func() any { b := make([]Node, nodeBlock); return &b }}
+
+// Release gives the memory of the tree back for the next document to be
+// parsed: d, its nodes and their attributes must not be used after it.
+// Nothing made from the tree that is kept (a walk's result) may share its
+// memory. The blocks are cleared, so that they keep nothing of this
+// document alive. Release on a released Doc does nothing.
+func (d *Doc) Release() {
+	b := d.b
+	if b == nil {
+		return
+	}
+	d.b, d.Root = nil, nil
+	for _, p := range b.taken {
+		clear(*p)
+		nodePool.Put(p)
+	}
+	b.taken, b.nodes = nil, nil
+	b.lx.Release()
 }
