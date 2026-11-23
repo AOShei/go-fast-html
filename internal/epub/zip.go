@@ -8,13 +8,13 @@ package epub
 import (
 	"archive/zip"
 	"bytes"
-	"compress/flate"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/AOShei/go-fast-core"
+	"github.com/AOShei/go-fast-core/inflate"
 )
 
 var (
@@ -58,6 +58,9 @@ func Open(src []byte, maxMembers int) (*Archive, error) {
 	a := &Archive{byName: map[string]*Member{}}
 	zr, err := zip.NewReader(bytes.NewReader(src), int64(len(src)))
 	if err == nil {
+		// Deflated members are read with go-fast-core's inflate, about
+		// twice as fast as compress/flate.
+		zr.RegisterDecompressor(zip.Deflate, inflate.Decompressor)
 		if maxMembers >= 0 && len(zr.File) > maxMembers {
 			return nil, ErrTooManyMembers
 		}
@@ -121,7 +124,7 @@ func (a *Archive) scan(src []byte, maxMembers int) error {
 				switch {
 				case method == 8:
 					a.add(&Member{Name: name, Size: usize, open: func() (io.ReadCloser, error) {
-						return flate.NewReader(bytes.NewReader(body)), nil
+						return io.NopCloser(inflate.NewRawReader(body, 1<<62)), nil
 					}})
 					n++
 				case method == 0 && known:
