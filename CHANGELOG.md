@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+JSON and YAML as text. Output for the other formats is unchanged; a file
+named `.json`, `.jsonl`, `.ndjson`, `.geojson`, `.yaml` or `.yml`, which
+`Detect` read as plain text, is now read in its format.
+
+- **New formats `json` and `yaml`** (`application/json`,
+  `application/yaml`), detected by the name only. One part of kind `body`
+  of `code` blocks whose language is the format, their text as written
+  (indentation and ligatures kept, control characters dropped, line ends
+  LF, CR LF or CR), nothing parsed. A YAML file has a block per document
+  (`---`, and after `...`); a long document is split at line ends into
+  pieces of about 1,000 lines and 256 KiB, the later ones `Continued`,
+  which joined with line feeds give it back. A line is never cut. Each
+  block is located by byte offset. Where the text budget runs out, the
+  number of lines not read is given.
+- **Command.** `-as json|yaml`; a directory includes these files.
+- `FuzzData`, in CI's fuzz smoke step.
+
 ## v0.2.0 (2026-11-22)
 
 Comma- and tab-separated values, and Jupyter notebooks. Output for the
