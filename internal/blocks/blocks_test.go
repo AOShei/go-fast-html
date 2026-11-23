@@ -2,6 +2,7 @@ package blocks
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -195,5 +196,42 @@ func TestHelpers(t *testing.T) {
 	}
 	if _, ok := parseInt("1234567890123456789"); ok {
 		t.Error("parseInt 19 digits")
+	}
+}
+
+// TestSpanAcrossBlocks: a block that ends inside a styled or linked
+// element takes the part of it read so far, and the next block's span
+// starts at its own start (it took the offset of the block before).
+func TestSpanAcrossBlocks(t *testing.T) {
+	for src, want := range map[string]string{
+		"x<b>y<p></p>0é1</b>z":                          `xy[1,2 b] | 0é1z[0,4 b]`,
+		"\u00a8<b><ul></ul>0±":                          `¨ | 0±[0,3 b]`,
+		`<a href="/u"><div>one</div><div>two</div></a>`: `one[0,3 /u] | two[0,3 /u]`,
+		"<b>a<pre>c<i>i<p>p</p>j</i></pre>b</b>":        `a[0,1 b] | cipj | b[0,1 b]`,
+		"<i>x<table><tr><td>c<p>d</table>y</i>":         `x[0,1 i] | <table> | y[0,1 i]`,
+	} {
+		r := walk(t, src, Config{Spans: true})
+		var got []string
+		for _, b := range r.Blocks {
+			if b.Kind == gofastcore.KindTable {
+				got = append(got, "<table>")
+				continue
+			}
+			s := b.Text
+			for _, sp := range b.Spans {
+				what := sp.Href
+				switch sp.Style {
+				case gofastcore.StyleBold:
+					what = "b"
+				case gofastcore.StyleItalic:
+					what = "i"
+				}
+				s += fmt.Sprintf("[%d,%d %s]", sp.Start, sp.End, what)
+			}
+			got = append(got, s)
+		}
+		if g := strings.Join(got, " | "); g != want {
+			t.Errorf("%s:\n got %s\nwant %s", src, g, want)
+		}
 	}
 }

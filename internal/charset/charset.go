@@ -278,13 +278,16 @@ func Lookup(label string) (Encoding, bool) {
 // Map takes offsets in the decoded text back to offsets in the source.
 // It keeps a checkpoint every few kilobytes of decoded text and decodes
 // forward from the nearest one, so it costs little memory whatever the
-// input.
+// input. It also remembers where the last call stopped: offsets asked for
+// in order, as a document's blocks are, cost in all one pass over the
+// source. A Map is not safe for use by more than one goroutine at once.
 type Map struct {
 	src      []byte
 	enc      Encoding
 	identity bool  // decoded text is the source after the BOM
 	base     int64 // the BOM length
 	cps      []checkpoint
+	last     checkpoint // where the last call stopped: a character start
 }
 
 type checkpoint struct{ dec, src int }
@@ -306,6 +309,9 @@ func (m *Map) Source(dec int) int64 {
 		i = 0
 	}
 	d, s := m.cps[i].dec, m.cps[i].src
+	if m.last.dec > d && m.last.dec <= dec {
+		d, s = m.last.dec, m.last.src
+	}
 	for d < dec && s < len(m.src) {
 		dn, sn := step(m.src, s, m.enc)
 		if d+dn > dec {
@@ -313,6 +319,7 @@ func (m *Map) Source(dec int) int64 {
 		}
 		d, s = d+dn, s+sn
 	}
+	m.last = checkpoint{d, s}
 	return int64(s)
 }
 
