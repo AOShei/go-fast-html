@@ -19,6 +19,16 @@ named `.json`, `.jsonl`, `.ndjson`, `.geojson`, `.yaml` or `.yml`, which
 - **Command.** `-as json|yaml`; a directory includes these files.
 - `FuzzData`, in CI's fuzz smoke step.
 
+### Faster
+
+- **Text not in UTF-8 is located as fast as UTF-8.** Finding each
+  block's byte range in a windows-1252, UTF-16, Cyrillic, Shift_JIS,
+  GBK, EUC-KR or Big5 file decoded up to 4 KiB of the file again for
+  each block; the map back to the source now goes on from where it last
+  stopped. 4 MiB of short paragraphs in windows-1252 took 1.3 s and
+  takes 48 ms (UTF-8: 31 ms); in UTF-16, 1.7 s and 57 ms. The output is
+  the same, byte for byte.
+
 ## v0.2.0 (2026-11-22)
 
 Comma- and tab-separated values, and Jupyter notebooks. Output for the

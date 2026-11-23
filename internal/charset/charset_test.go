@@ -2,6 +2,7 @@ package charset
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -121,6 +122,7 @@ func FuzzCharset(f *testing.F) {
 			}
 			prev = s
 		}
+		sameInAnyOrder(t, m, min(len(out), 4096), uint64(len(b)))
 	})
 }
 
@@ -238,6 +240,74 @@ func FuzzDoubleByte(f *testing.F) {
 			if s := m.Source(len(out)); !cut && s != int64(len(b)) {
 				t.Fatalf("%s: Source(end) = %d, want %d", enc, s, len(b))
 			}
+			sameInAnyOrder(t, m, min(len(out), 4096), uint64(len(b)))
 		}
 	})
+}
+
+// sameInAnyOrder checks that m gives every offset of the decoded text
+// (n bytes) the same source offset whatever order they are asked in: in
+// order, backwards, and shuffled, each against a Map that starts from its
+// checkpoints alone.
+func sameInAnyOrder(t *testing.T, m *Map, n int, seed uint64) {
+	t.Helper()
+	want := make([]int64, n+1)
+	for i := range want {
+		m.last = checkpoint{}
+		want[i] = m.Source(i)
+	}
+	order := make([]int, 0, 3*(n+1))
+	for i := 0; i <= n; i++ {
+		order = append(order, i)
+	}
+	for i := n; i >= 0; i-- {
+		order = append(order, i)
+	}
+	x := seed | 1
+	for range n + 1 {
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		order = append(order, int(x%uint64(n+1)))
+	}
+	m.last = checkpoint{}
+	for _, i := range order {
+		if got := m.Source(i); got != want[i] {
+			t.Fatalf("Source(%d) = %d, want %d", i, got, want[i])
+		}
+	}
+}
+
+// TestSourceAnyOrder: the remembered position of the last call never
+// changes an answer, in any encoding, across checkpoints.
+func TestSourceAnyOrder(t *testing.T) {
+	src := make([]byte, 3*checkpointEvery)
+	x := uint32(1)
+	for i := range src {
+		x = x*1664525 + 1013904223
+		src[i] = byte(x >> 24)
+		if x&3 == 0 {
+			src[i] = 'a' + byte(x>>8)%26
+		}
+	}
+	for _, enc := range []Encoding{UTF8, Windows1252, Windows1251, UTF16LE, UTF16BE, ShiftJIS, GBK, EUCKR, Big5} {
+		out, m, _, _ := Decode(src, Result{Enc: enc}, math.MaxInt64)
+		sameInAnyOrder(t, m, len(out), uint64(enc)+7)
+	}
+}
+
+// BenchmarkSourceInOrder asks for the start and end of every 40-byte
+// paragraph of 4 MiB of windows-1252 in order, as the blocks of a
+// document are: one pass over the source, not 4 KiB of decoding a call.
+func BenchmarkSourceInOrder(b *testing.B) {
+	src := []byte(strings.Repeat("caf\xE9 na\xEFve r\xE9sum\xE9 text here.\n\n", 4<<20/40))
+	out, m, _, _ := Decode(src, Result{Enc: Windows1252}, math.MaxInt64)
+	b.ResetTimer()
+	for range b.N {
+		m.last = checkpoint{}
+		for i := 0; i < len(out); i += 40 {
+			m.Source(i)
+			m.Source(min(i+38, len(out)))
+		}
+	}
 }
