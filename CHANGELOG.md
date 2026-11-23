@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.1 (2026-11-24)
+
+- **go-fast-core v0.1.4** (was v0.1.2): `Document.Text` and `Markdown`
+  allocate their result once. The output is unchanged.
+
 ## v0.4.0 (2026-11-23)
 
 Encodings the benchmark against Common Crawl found missing, a `<meta>`
