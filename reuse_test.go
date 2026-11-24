@@ -16,11 +16,12 @@ import (
 // nothing of it: each document is extracted, then many others that reuse
 // the memory, and its JSON must be as it was.
 func TestInputReused(t *testing.T) {
+	defer poisonReleased.Store(poisonReleased.Load())
 	page := func(i int) string {
 		return fmt.Sprintf(`<html lang="en-%d"><head><title>T%d</title><meta name="author" content="Author %d">
 <meta name="keywords" content="k%d"><style>p { color: red }</style><script>var x%d = 1;</script></head>
 <body><h1 id="top%d">Heading %d</h1><p title="tip %d" aria-label="label %d">Text %d <a href="/link/%d" name="n%d">link %d</a>
-<img src="/img/%d.png" alt="alt %d" width="10" height="20"> <b>bold %d</b></p><!-- comment %d -->
+<img src="/img/%d.png" alt="alt %d" width="10" height="20"> <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="> <b>bold %d</b></p><!-- comment %d -->
 <pre class="language-go%d"><code>code %d</code></pre><ul><li>one %d<li><input type="checkbox" checked> two %d</ul>
 <table><tr><th>h%d<td><a href="/c%d">c%d</a></table><form><input type="hidden" name="f%d" value="v%d">
 <select name="s%d"><option>o%d<option label="l%d"></select><textarea name="t%d">ta%d</textarea></form></body></html>`,
@@ -50,6 +51,15 @@ func TestInputReused(t *testing.T) {
 	for format, gen := range inputs {
 		for _, spans := range []bool{false, true} {
 			src := gen(1)
+			// Read before anything reuses the memory, the document is as it
+			// should be; with the buffer overwritten as it is given back,
+			// it must not change.
+			poisonReleased.Store(false)
+			want := extract(format, src, spans)
+			poisonReleased.Store(true)
+			if got := extract(format, src, spans); got != want {
+				t.Errorf("%s (spans %v): the document shares the memory given back:\n%s\n%s", format, spans, want, got)
+			}
 			doc, err := (&Extractor{Format: format}).Extract(context.Background(), strings.NewReader(src), int64(len(src)), &gofastcore.Options{Spans: spans})
 			if err != nil {
 				t.Fatal(err)

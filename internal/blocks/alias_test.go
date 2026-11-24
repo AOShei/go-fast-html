@@ -16,7 +16,7 @@ func TestNoAliasOfPage(t *testing.T) {
 	src := []byte(`<html lang="en-GB"><head><title>T</title><meta name="author" content="A">
 <meta name="description" content="D"><style>p{}</style><script src="/s.js">var x</script></head>
 <body><h1 id="top">Head</h1><p title="tip" aria-label="lab">Text <a href="/link" name="n">link</a>
-<img src="/i.png" alt="alt"> <b>bold</b></p><!-- note --><pre class="language-go"><code>code</code></pre>
+<img src="/i.png" alt="alt"> <img src="data:image/png;base64,iVBORw0KGgo=" alt="inline"> <b>bold</b></p><!-- note --><pre class="language-go"><code>code</code></pre>
 <ul><li>one<li><input type="checkbox" checked> two</ul><table><tr><th>h<td><a href="/c">c</a></table>
 <form><input type="hidden" name="field" value="v"><select name="s"><option>o1<option label="l2"></select>
 <textarea name="ta">tt</textarea></form><iframe srcdoc="<p>inner</p>"></iframe></body></html>`)

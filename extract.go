@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/blocks"
@@ -793,9 +794,19 @@ func inputBuffer(size int64) []byte {
 	return make([]byte, size, int64(1)<<c)
 }
 
+// poisonReleased, set by the tests, overwrites each buffer releaseInput
+// is given, so that a document still sharing its memory changes at once
+// and in every test, not only when another document happens to reuse it.
+var poisonReleased atomic.Bool
+
 // releaseInput gives a buffer of inputBuffer back: nothing may use it
 // after.
 func releaseInput(b []byte) {
+	if poisonReleased.Load() {
+		for i := range b[:cap(b)] {
+			b[:cap(b)][i] = 0xFF
+		}
+	}
 	c := inputClass(int64(cap(b)))
 	if c > maxInputClass || int64(cap(b)) != int64(1)<<c {
 		return

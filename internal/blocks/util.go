@@ -166,7 +166,6 @@ func (w *walker) resolve(src string) (ImageRef, bool) {
 	return w.cfg.Image(src)
 }
 
-// dataURI decodes a data: URI within the decode budget.
 // dataURI decodes a data: URI. The bytes are decoded whatever the images
 // mode, since the image's ID is their hash. overBudget reports that they
 // would pass the decode budget and were not decoded.
@@ -214,7 +213,10 @@ func (w *walker) dataURI(s string) (mime string, data []byte, ok, overBudget boo
 	if strings.ContainsFunc(mime, func(r rune) bool { return r < 0x21 || r > 0x7E }) {
 		mime = ""
 	}
-	return mime, data, true, false
+	// strings.ToLower returns s itself when it is lower case already: a
+	// copy, so that the document does not share the page's memory, which
+	// the next document reuses.
+	return strings.Clone(mime), data, true, false
 }
 
 // textOf returns all text under n.
