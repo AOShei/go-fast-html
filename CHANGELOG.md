@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.4.4 (2026-11-24)
+
+- **Fixed: the type of an image in a `data:` URI could be overwritten**
+  by the next document read in the same process (v0.4.0 to v0.4.3). The
+  type was a slice of the page (`strings.ToLower` returns its argument
+  when it is lower case already), and the page's buffer goes back to a
+  pool when the extraction ends. Read in a batch, an image's `mime` became
+  bytes of a later page, such as `ml" targe`: 317 of 22,421 documents of
+  go-fast's benchmark set read with 8 workers, 1,118 of the 9,835 pages of
+  `bench/` with each buffer overwritten when it is given back. It is
+  copied now. With each buffer overwritten, the output on those pages and
+  on the corpus is the same as with no buffer reused: no other field of a
+  document shared the page there.
+- **The tests overwrite each buffer given back**, so that a document
+  sharing it fails at once, not only when a later document happens to
+  reuse the memory: `TestInputReused` compares each document read with and
+  without it, and `TestNoAliasOfPage` and `TestInputReused` have a `data:`
+  image. Without the fix, four tests fail every time. Benchmarks run
+  without it; outside the tests it costs one atomic load per document.
+
 ## v0.4.3 (2026-11-24)
 
 - **An EPUB cut short is read as every go-fast library reads a cut zip**,

@@ -32,7 +32,7 @@ This library produces no running headers and footers itself; `-furniture` is the
 | 200 | 4.89 s | 104 MB | 0.65 s | 562 MB |
 | 400 | 4.71 s | 191 MB | 0.59 s | 1,032 MB |
 
-**Status: v0.4.3 (2026-11-24).** The changes are in [`CHANGELOG.md`](CHANGELOG.md); the development history and the items still open are in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
+**Status: v0.4.4 (2026-11-24).** The changes are in [`CHANGELOG.md`](CHANGELOG.md); the development history and the items still open are in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
 ## What is read
 
