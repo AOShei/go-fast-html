@@ -288,7 +288,8 @@ func TestEPUBDamaged(t *testing.T) {
 	doc := extractEPUB(t, cut, nil)
 	found := false
 	for _, w := range doc.Warnings {
-		found = found || w.Code == gofastcore.WarnInputRepaired
+		// The mimetype member and the eleven files.
+		found = found || w.Code == gofastcore.WarnInputRepaired && strings.HasSuffix(w.Message, ". 12 members were found by their own headers; any that followed are lost")
 	}
 	if !found || len(doc.Parts) < 2 {
 		t.Errorf("repaired: %v, %d parts", found, len(doc.Parts))

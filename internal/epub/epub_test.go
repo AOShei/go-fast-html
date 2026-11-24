@@ -71,7 +71,7 @@ func zipOf(t *testing.T, files ...string) []byte {
 
 func TestArchive(t *testing.T) {
 	b := zipOf(t, "a", "hello", "b", "world", "a", "again")
-	a, err := Open(b, -1)
+	a, err := Open(b, -1, 1<<30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,12 +88,12 @@ func TestArchive(t *testing.T) {
 	if _, err := a.Read("zz", budget, -1); !errors.Is(err, ErrMissing) {
 		t.Errorf("missing: %v", err)
 	}
-	if _, err := Open(b, 1); !errors.Is(err, ErrTooManyMembers) {
+	if _, err := Open(b, 1, 1<<30); !errors.Is(err, ErrTooManyMembers) {
 		t.Errorf("limit: %v", err)
 	}
 	// Without the central directory.
 	cut := b[:bytes.Index(b, []byte("PK\x01\x02"))]
-	a, err = Open(cut, -1)
+	a, err = Open(cut, -1, 1<<30)
 	if err != nil || !a.Repaired || len(a.Members) != 2 {
 		t.Fatalf("repaired %v %+v", err, a)
 	}
@@ -101,8 +101,22 @@ func TestArchive(t *testing.T) {
 	if d, err := a.Read("b", budget, -1); err != nil || string(d) != "world" {
 		t.Errorf("read b repaired: %q %v", d, err)
 	}
-	if _, err := Open([]byte("not a zip"), -1); !errors.Is(err, ErrNotZip) {
+	if _, err := Open([]byte("not a zip"), -1, 1<<30); !errors.Is(err, ErrNotZip) {
 		t.Errorf("not zip: %v", err)
+	}
+	// Finding where a member ends decompresses it: a bomb meets the
+	// bound.
+	var bomb bytes.Buffer
+	zw := zip.NewWriter(&bomb)
+	w, _ := zw.Create("zeros")
+	w.Write(make([]byte, 16<<20))
+	zw.Close()
+	cut = bomb.Bytes()[:bytes.Index(bomb.Bytes(), []byte("PK\x01\x02"))]
+	if _, err := Open(cut, -1, 1<<20); !errors.Is(err, ErrBudget) {
+		t.Errorf("a bomb without its directory: %v", err)
+	}
+	if a, err := Open(cut, -1, 1<<30); err != nil || !a.Repaired || a.Recovery.Members != 1 {
+		t.Errorf("within the bound: %v", err)
 	}
 }
 
@@ -115,7 +129,7 @@ func TestPackageAndEncryption(t *testing.T) {
 <spine toc="n"><itemref idref="a" linear="no"/></spine></package>`,
 		"META-INF/encryption.xml", `<encryption><EncryptedData><EncryptionMethod Algorithm="aes"/><CipherData><CipherReference URI="pkg/a.xhtml"/></CipherData></EncryptedData>
 <EncryptedData><EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/><CipherData><CipherReference URI="pkg/f.otf"/></CipherData></EncryptedData></encryption>`)
-	a, _ := Open(b, -1)
+	a, _ := Open(b, -1, 1<<30)
 	_, budget := gofastcore.WithDecodeBudget(context.Background(), gofastcore.Limits{}, 1<<20)
 	p, err := a.ReadPackage(budget)
 	if err != nil {
@@ -157,14 +171,14 @@ func TestEncryptionUnread(t *testing.T) {
 		if c.xml != "" {
 			files = append(files, "META-INF/encryption.xml", c.xml)
 		}
-		a, _ := Open(zipOf(t, files...), -1)
+		a, _ := Open(zipOf(t, files...), -1, 1<<30)
 		enc, err := a.Encryption(budget)
 		if !errors.Is(err, c.want) || c.want == nil && err != nil || c.want != nil && enc != nil {
 			t.Errorf("%s: %v %v", c.name, enc, err)
 		}
 	}
 	// Past the limit on decoded bytes.
-	a, _ := Open(zipOf(t, "META-INF/encryption.xml", "<encryption>"+entry+"</encryption>"), -1)
+	a, _ := Open(zipOf(t, "META-INF/encryption.xml", "<encryption>"+entry+"</encryption>"), -1, 1<<30)
 	_, small := gofastcore.WithDecodeBudget(context.Background(), gofastcore.Limits{MaxDecodedBytes: 10}, 0)
 	if enc, err := a.Encryption(small); !errors.Is(err, ErrBudget) || enc != nil {
 		t.Errorf("budget: %v %v", enc, err)
@@ -184,7 +198,7 @@ func TestPackageTooLarge(t *testing.T) {
 		{"META-INF/container.xml", container + big, "p.opf", "<package/>"},
 		{"META-INF/container.xml", container, "p.opf", "<package/>" + big},
 	} {
-		a, _ := Open(zipOf(t, files...), -1)
+		a, _ := Open(zipOf(t, files...), -1, 1<<30)
 		if _, err := a.ReadPackage(budget); !errors.Is(err, ErrTooLarge) {
 			t.Errorf("%s: %v", files[1][:20], err)
 		}

@@ -58,16 +58,15 @@ func (e *Extractor) epub(ctx context.Context, doc *gofastcore.Document, src []by
 	if e.MaxArchiveMembers < 0 {
 		maxMembers = -1
 	}
-	a, err := epub.Open(src, maxMembers)
+	a, err := epub.Open(src, maxMembers, decode.Left())
 	switch {
-	case errors.Is(err, epub.ErrTooManyMembers):
+	case errors.Is(err, epub.ErrTooManyMembers), errors.Is(err, epub.ErrBudget):
 		return nil, fmt.Errorf("gofasthtml: %v: %w", err, gofastcore.ErrLimitExceeded)
 	case err != nil:
 		return nil, fmt.Errorf("gofasthtml: %v: %w", err, gofastcore.ErrMalformed)
 	}
 	if a.Repaired {
-		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnInputRepaired,
-			"the archive's directory could not be read; its members were found by their own headers")
+		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnInputRepaired, a.Recovery.Message(nil))
 	}
 	if len(a.Duplicates) > 0 {
 		doc.Warn(gofastcore.SeverityWarning, gofastcore.WarnInputAmbiguous,
