@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **An EPUB cut short is read as every go-fast library reads a cut zip**,
+  with go-fast-core's `ziprecover` (go-fast-core v0.1.6, was v0.1.5):
+  by its members' own headers, in order from the first byte, instead of
+  by searching the file for header signatures. A header inside a
+  member's data is no longer taken for a member, and each recovered
+  member's CRC-32 is checked. A member damaged in the middle of the file
+  now ends recovery there, where the search went on past it. The
+  `input.repaired` warning says how many members were found and which
+  one breaks off. On the 25 EPUBs of the corpus, whole and cut at twelve
+  places, the text and JSON are unchanged but for that message.
+
 ## v0.4.2 (2026-11-24)
 
 - **EPUB members are decompressed with go-fast-core's `inflate`**
