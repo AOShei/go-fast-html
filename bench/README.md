@@ -4,15 +4,15 @@ go-fast-html is measured against the HTML text extractors data and AI pipelines 
 
 ## What the comparison shows
 
-On 9,835 real pages from Common Crawl (1.45 GiB):
+On 9,835 real pages from Common Crawl (1.45 GiB). The go-fast-html figures are for v0.4.4, measured on 2026-11-24; the other tools' are from 2026-11-23. Every page gives the same text as with v0.4.0.
 
-- **Speed.** With one worker, go-fast-html reads them in 5.4 s.
+- **Speed.** With one worker, go-fast-html reads them in 5.2 s.
   - selectolax, a parser written in C on the lexbor engine, is faster (3.8 s).
-  - Every other tool is slower: resiliparse (lexbor, C++) 1.4 times, the Rust `html2text` crate 2.8 times, inscriptis 6 times, BeautifulSoup 13 times, trafilatura 27 times, markitdown 43 times.
-  - With 24 workers go-fast-html takes 0.80 s: selectolax is faster (0.48 s), resiliparse about level (0.84 s), and every other tool slower, the Rust `html2text` crate 1.7 times.
+  - Every other tool is slower: resiliparse (lexbor, C++) 1.4 times, the Rust `html2text` crate 2.9 times, inscriptis 6 times, BeautifulSoup 14 times, trafilatura 29 times, markitdown 45 times.
+  - With 24 workers go-fast-html takes 0.79 s: selectolax is faster (0.48 s), resiliparse about level (0.84 s), and every other tool slower, the Rust `html2text` crate 1.7 times.
   - go-fast-html does more per page than selectolax: block structure, tables, links, declared display, locations, metadata, and scripts and comments kept as stored data.
 - **The slowest page.** go-fast-html's slowest page took 19 ms with one worker. Every other tool had a page between 89 ms and 2 s. In a batch, this is what decides whether a worker stalls.
-- **Memory.** With one worker go-fast-html peaks at 62 MB, with selectolax (64 MB) and htmd (50 MB) the least. With 24 workers it uses 320 MB, against 0.4 to 4.5 GB for the others. Go's garbage collector can trade memory for speed (`GOGC`, see the library's README); the tables use Go's default.
+- **Memory.** With one worker go-fast-html peaks at 70 MB; htmd (50 MB) and selectolax (64 MB) use less. With 24 workers it uses 286 MB, against 0.4 to 4.5 GB for the others. Go's garbage collector can trade memory for speed (`GOGC`, see the library's README); the tables use Go's default.
 - **Accuracy.** Measured against the text Chromium shows:
   - Rendered as a browser does, go-fast-html has the highest F1 of all tools: 0.966, against inscriptis 0.956 and selectolax 0.929.
   - Its `Text()` scores lower (0.875) only because it keeps what a browser does not draw: HTML comments, `title` and `aria-label` text, text the page declares hidden, and images' alt text. That is the series' rule "preserve content", and each of these carries its reason in the output. Its recall, 0.995, is the highest.
@@ -24,7 +24,8 @@ On 9,835 real pages from Common Crawl (1.45 GiB):
 ## History
 
 - v0.3.0: 10.3 s with one worker, 2.08 s with 24; 10 pages refused (7 with the HTTP charset).
-- v0.4.0: the `<meta charset>` up to the first MiB when the page is not UTF-8, and EUC-JP, GB18030, KOI8-R and -U, IBM866, x-mac-cyrillic and ISO-8859-2 to 16 (#22); a lexer that does not copy the page, and blocks of nodes (#23); memory reused from one page to the next (#24). Output of #23 and #24 byte-identical to that before them.
+- v0.4.0: the `<meta charset>` up to the first MiB when the page is not UTF-8, and EUC-JP, GB18030, KOI8-R and -U, IBM866, x-mac-cyrillic and ISO-8859-2 to 16 (#22); a lexer that does not copy the page, and blocks of nodes (#23); memory reused from one page to the next (#24). Output of #23 and #24 byte-identical to that before them. 5.39 s with one worker, 0.80 s with 24.
+- v0.4.4: 5.17 s and 0.79 s, the same text; v0.4.1 to v0.4.4 changed EPUB reading and the `mime` of `data:` images, not the text of these pages.
 
 ## Reproducing
 
