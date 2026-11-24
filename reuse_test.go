@@ -20,7 +20,7 @@ func TestInputReused(t *testing.T) {
 		return fmt.Sprintf(`<html lang="en-%d"><head><title>T%d</title><meta name="author" content="Author %d">
 <meta name="keywords" content="k%d"><style>p { color: red }</style><script>var x%d = 1;</script></head>
 <body><h1 id="top%d">Heading %d</h1><p title="tip %d" aria-label="label %d">Text %d <a href="/link/%d" name="n%d">link %d</a>
-<img src="/img/%d.png" alt="alt %d" width="10" height="20"> <b>bold %d</b></p><!-- comment %d -->
+<img src="/img/%d.png" alt="alt %d" width="10" height="20"> <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="> <b>bold %d</b></p><!-- comment %d -->
 <pre class="language-go%d"><code>code %d</code></pre><ul><li>one %d<li><input type="checkbox" checked> two %d</ul>
 <table><tr><th>h%d<td><a href="/c%d">c%d</a></table><form><input type="hidden" name="f%d" value="v%d">
 <select name="s%d"><option>o%d<option label="l%d"></select><textarea name="t%d">ta%d</textarea></form></body></html>`,
