@@ -12,31 +12,31 @@ Versions: beautifulsoup4 4.15.0, lxml 6.1.3, html2text 2025.4.15, inscriptis 2.7
 
 | Tool | Wall | Against go-fast-html | CPU | Peak memory | Failed | Median | 95th | 99th | Slowest page |
 |---|---|---|---|---|---|---|---|---|---|
-| selectolax (lexbor, C) | 3.77 s | 0.70 times | 3.7 s | 64 MB | 0 | 0.19 ms | 0.81 ms | 1.94 ms | 165 ms |
-| **go-fast-html** | 5.39 s |  | 6.7 s | 62 MB | 7 | 0.31 ms | 1.45 ms | 3.15 ms | 19 ms |
-| resiliparse (lexbor, C++) | 7.35 s | 1.36 times | 7.3 s | 83 MB | 0 | 0.46 ms | 1.74 ms | 3.74 ms | 182 ms |
-| html2text (Rust crate) | 14.84 s | 2.76 times | 14.8 s | 84 MB | 0 | 0.95 ms | 4.13 ms | 9.27 ms | 89 ms |
-| htmd (Rust crate) | 26.68 s | 4.95 times | 26.4 s | 50 MB | 1 | 0.95 ms | 5.58 ms | 25.36 ms | 1824 ms |
-| inscriptis | 33.25 s | 6.17 times | 33.0 s | 107 MB | 0 | 2.22 ms | 9.02 ms | 20.16 ms | 170 ms |
-| html2text (Python) | 71.60 s | 13.30 times | 71.2 s | 82 MB | 0 | 4.74 ms | 20.29 ms | 46.41 ms | 351 ms |
-| BeautifulSoup + lxml | 72.00 s | 13.37 times | 71.7 s | 135 MB | 0 | 4.22 ms | 20.80 ms | 60.65 ms | 444 ms |
-| trafilatura (main content only) | 147.73 s | 27.43 times | 147.2 s | 213 MB | 0 | 7.73 ms | 46.43 ms | 118.72 ms | 1974 ms |
-| markitdown | 234.12 s | 43.47 times | 3938.3 s | 266 MB | 0 | 16.51 ms | 64.53 ms | 134.49 ms | 875 ms |
+| selectolax (lexbor, C) | 3.77 s | 0.73 times | 3.7 s | 64 MB | 0 | 0.19 ms | 0.81 ms | 1.94 ms | 165 ms |
+| **go-fast-html** | 5.17 s |  | 6.5 s | 70 MB | 7 | 0.30 ms | 1.42 ms | 3.05 ms | 19 ms |
+| resiliparse (lexbor, C++) | 7.35 s | 1.42 times | 7.3 s | 83 MB | 0 | 0.46 ms | 1.74 ms | 3.74 ms | 182 ms |
+| html2text (Rust crate) | 14.84 s | 2.87 times | 14.8 s | 84 MB | 0 | 0.95 ms | 4.13 ms | 9.27 ms | 89 ms |
+| htmd (Rust crate) | 26.68 s | 5.16 times | 26.4 s | 50 MB | 1 | 0.95 ms | 5.58 ms | 25.36 ms | 1824 ms |
+| inscriptis | 33.25 s | 6.43 times | 33.0 s | 107 MB | 0 | 2.22 ms | 9.02 ms | 20.16 ms | 170 ms |
+| html2text (Python) | 71.60 s | 13.84 times | 71.2 s | 82 MB | 0 | 4.74 ms | 20.29 ms | 46.41 ms | 351 ms |
+| BeautifulSoup + lxml | 72.00 s | 13.92 times | 71.7 s | 135 MB | 0 | 4.22 ms | 20.80 ms | 60.65 ms | 444 ms |
+| trafilatura (main content only) | 147.73 s | 28.56 times | 147.2 s | 213 MB | 0 | 7.73 ms | 46.43 ms | 118.72 ms | 1974 ms |
+| markitdown | 234.12 s | 45.26 times | 3938.3 s | 266 MB | 0 | 16.51 ms | 64.53 ms | 134.49 ms | 875 ms |
 
 ## 24 workers
 
 | Tool | Wall | Against go-fast-html | CPU | Peak memory | Failed | Median | 95th | 99th | Slowest page |
 |---|---|---|---|---|---|---|---|---|---|
-| selectolax (lexbor, C) | 0.48 s | 0.60 times | 7.8 s | 646 MB | 0 | 0.36 ms | 1.99 ms | 5.83 ms | 205 ms |
-| **go-fast-html** | 0.80 s |  | 12.8 s | 320 MB | 7 | 0.86 ms | 5.59 ms | 11.67 ms | 65 ms |
-| resiliparse (lexbor, C++) | 0.84 s | 1.06 times | 15.2 s | 921 MB | 0 | 0.85 ms | 4.12 ms | 10.61 ms | 347 ms |
-| html2text (Rust crate) | 1.35 s | 1.68 times | 26.6 s | 548 MB | 0 | 1.57 ms | 8.23 ms | 20.93 ms | 190 ms |
-| inscriptis | 2.78 s | 3.48 times | 59.1 s | 1,335 MB | 0 | 3.68 ms | 17.21 ms | 38.95 ms | 208 ms |
-| htmd (Rust crate) | 3.51 s | 4.38 times | 42.9 s | 440 MB | 1 | 1.49 ms | 9.47 ms | 48.17 ms | 2218 ms |
-| BeautifulSoup + lxml | 6.33 s | 7.92 times | 134.3 s | 1,902 MB | 0 | 7.08 ms | 39.10 ms | 148.08 ms | 752 ms |
-| html2text (Python) | 6.61 s | 8.26 times | 130.5 s | 1,163 MB | 0 | 8.64 ms | 40.28 ms | 92.79 ms | 664 ms |
-| trafilatura (main content only) | 14.16 s | 17.70 times | 282.7 s | 3,022 MB | 0 | 14.73 ms | 90.39 ms | 222.64 ms | 3821 ms |
-| markitdown | 99.51 s | 124.37 times | 2327.1 s | 4,450 MB | 0 | 119.59 ms | 637.02 ms | 1617.00 ms | 11741 ms |
+| selectolax (lexbor, C) | 0.48 s | 0.61 times | 7.8 s | 646 MB | 0 | 0.36 ms | 1.99 ms | 5.83 ms | 205 ms |
+| **go-fast-html** | 0.79 s |  | 13.0 s | 286 MB | 7 | 0.87 ms | 5.03 ms | 10.68 ms | 55 ms |
+| resiliparse (lexbor, C++) | 0.84 s | 1.07 times | 15.2 s | 921 MB | 0 | 0.85 ms | 4.12 ms | 10.61 ms | 347 ms |
+| html2text (Rust crate) | 1.35 s | 1.71 times | 26.6 s | 548 MB | 0 | 1.57 ms | 8.23 ms | 20.93 ms | 190 ms |
+| inscriptis | 2.78 s | 3.54 times | 59.1 s | 1,335 MB | 0 | 3.68 ms | 17.21 ms | 38.95 ms | 208 ms |
+| htmd (Rust crate) | 3.51 s | 4.46 times | 42.9 s | 440 MB | 1 | 1.49 ms | 9.47 ms | 48.17 ms | 2218 ms |
+| BeautifulSoup + lxml | 6.33 s | 8.06 times | 134.3 s | 1,902 MB | 0 | 7.08 ms | 39.10 ms | 148.08 ms | 752 ms |
+| html2text (Python) | 6.61 s | 8.41 times | 130.5 s | 1,163 MB | 0 | 8.64 ms | 40.28 ms | 92.79 ms | 664 ms |
+| trafilatura (main content only) | 14.16 s | 18.01 times | 282.7 s | 3,022 MB | 0 | 14.73 ms | 90.39 ms | 222.64 ms | 3821 ms |
+| markitdown | 99.51 s | 126.58 times | 2327.1 s | 4,450 MB | 0 | 119.59 ms | 637.02 ms | 1617.00 ms | 11741 ms |
 
 ## Accuracy
 
