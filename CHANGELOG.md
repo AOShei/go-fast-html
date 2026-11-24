@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.2 (2026-11-24)
 
 - **EPUB members are decompressed with go-fast-core's `inflate`**
   (go-fast-core v0.1.5, was v0.1.4), about twice as fast as
