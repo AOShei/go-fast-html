@@ -6,15 +6,13 @@
 package epub
 
 import (
-	"archive/zip"
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/AOShei/go-fast-core"
-	"github.com/AOShei/go-fast-core/inflate"
+	"github.com/AOShei/go-fast-core/ziprecover"
 )
 
 var (
@@ -45,40 +43,44 @@ type Archive struct {
 	Members []*Member
 	byName  map[string]*Member
 	// Repaired reports that the central directory could not be read and
-	// the members were found by their local headers.
+	// the members were found by their local headers; Recovery says what
+	// was found.
 	Repaired bool
+	Recovery *ziprecover.Recovery
 	// Duplicates lists names that occur more than once; the first is
 	// used.
 	Duplicates []string
 }
 
-// Open reads the directory of the archive src. maxMembers bounds the
-// number of members; negative means no bound.
-func Open(src []byte, maxMembers int) (*Archive, error) {
+// Open reads the archive src with go-fast-core's ziprecover: its
+// directory, or for a file cut short, the members found by their own
+// headers, in order from the first byte. maxMembers bounds the number of
+// members; negative means no bound. maxDecoded bounds what recovery may
+// decompress to find where members end (ErrBudget past it); it is not
+// taken from the budget the members are read with.
+func Open(src []byte, maxMembers int, maxDecoded int64) (*Archive, error) {
 	a := &Archive{byName: map[string]*Member{}}
-	zr, err := zip.NewReader(bytes.NewReader(src), int64(len(src)))
-	if err == nil {
-		// Deflated members are read with go-fast-core's inflate, about
-		// twice as fast as compress/flate.
-		zr.RegisterDecompressor(zip.Deflate, inflate.Decompressor)
-		if maxMembers >= 0 && len(zr.File) > maxMembers {
-			return nil, ErrTooManyMembers
-		}
-		for _, f := range zr.File {
-			if f.Mode().IsDir() {
-				continue
-			}
-			a.add(&Member{Name: f.Name, Size: int64(min(f.UncompressedSize64, 1<<62)), open: f.Open})
-		}
-		return a, nil
-	}
-	if err := a.scan(src, maxMembers); err != nil {
-		return nil, err
-	}
-	if len(a.Members) == 0 {
+	lim := ziprecover.Limits{MaxMembers: max(maxMembers, 0), MaxDecodedBytes: max(maxDecoded, 1)}
+	zr, rec, err := ziprecover.Open(bytes.NewReader(src), int64(len(src)), lim)
+	switch {
+	case errors.Is(err, ziprecover.ErrTooManyMembers):
+		return nil, ErrTooManyMembers
+	case errors.Is(err, ziprecover.ErrBudget):
+		return nil, ErrBudget
+	case err != nil:
 		return nil, ErrNotZip
 	}
-	a.Repaired = true
+	if maxMembers >= 0 && len(zr.File) > maxMembers {
+		return nil, ErrTooManyMembers
+	}
+	for _, f := range zr.File {
+		if f.Mode().IsDir() {
+			continue
+		}
+		a.add(&Member{Name: f.Name, Size: int64(min(f.UncompressedSize64, 1<<62)), open: f.Open})
+	}
+	a.Recovery = rec
+	a.Repaired = rec != nil
 	return a, nil
 }
 
@@ -89,59 +91,6 @@ func (a *Archive) add(m *Member) {
 	}
 	a.byName[m.Name] = m
 	a.Members = append(a.Members, m)
-}
-
-// scan finds members by their local file headers, for an archive whose
-// central directory is missing or damaged (a file cut short). A member
-// compressed with deflate is read to the end of its stream; a stored one
-// needs its size in the header.
-func (a *Archive) scan(src []byte, maxMembers int) error {
-	sig := []byte("PK\x03\x04")
-	n := 0
-	for i := bytes.Index(src, sig); i >= 0; {
-		if maxMembers >= 0 && n >= maxMembers {
-			return ErrTooManyMembers
-		}
-		next := i + 4
-		if i+30 <= len(src) {
-			h := src[i:]
-			flags := binary.LittleEndian.Uint16(h[6:])
-			method := binary.LittleEndian.Uint16(h[8:])
-			csize := int64(binary.LittleEndian.Uint32(h[18:]))
-			usize := int64(binary.LittleEndian.Uint32(h[22:]))
-			nameLen := int(binary.LittleEndian.Uint16(h[26:]))
-			extraLen := int(binary.LittleEndian.Uint16(h[28:]))
-			data := i + 30 + nameLen + extraLen
-			if data <= len(src) && flags&1 == 0 {
-				name := string(src[i+30 : i+30+nameLen])
-				end := int64(len(src))
-				known := flags&8 == 0 || csize > 0
-				if known && int64(data)+csize <= end {
-					end = int64(data) + csize
-					next = int(end)
-				}
-				body := src[data:end]
-				switch {
-				case method == 8:
-					a.add(&Member{Name: name, Size: usize, open: func() (io.ReadCloser, error) {
-						return io.NopCloser(inflate.NewRawReader(body, 1<<62)), nil
-					}})
-					n++
-				case method == 0 && known:
-					a.add(&Member{Name: name, Size: usize, open: func() (io.ReadCloser, error) {
-						return io.NopCloser(bytes.NewReader(body)), nil
-					}})
-					n++
-				}
-			}
-		}
-		k := bytes.Index(src[next:], sig)
-		if k < 0 {
-			break
-		}
-		i = next + k
-	}
-	return nil
 }
 
 // Has reports whether the archive has a member of that name.
