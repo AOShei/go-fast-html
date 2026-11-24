@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.3 (2026-11-24)
 
 - **An EPUB cut short is read as every go-fast library reads a cut zip**,
   with go-fast-core's `ziprecover` (go-fast-core v0.1.6, was v0.1.5):
