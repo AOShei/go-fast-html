@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **EPUB members are decompressed with go-fast-core's `inflate`**
+  (go-fast-core v0.1.5, was v0.1.4), about twice as fast as
+  `compress/flate`. Fifteen EPUBs read 20 times take 0.57 s instead of
+  0.72 s. The output is byte-identical on the 25 EPUBs of the corpus. A
+  damaged member keeps up to 32 KiB more of its text before the error.
+
 ## v0.4.1 (2026-11-24)
 
 - **go-fast-core v0.1.4** (was v0.1.2): `Document.Text` and `Markdown`
