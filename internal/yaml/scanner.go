@@ -749,21 +749,19 @@ func (s *scanner) fetchTag() {
 		for isWord(s.at(0)) {
 			s.skip()
 		}
-		if s.at(0) == '!' && s.pos > p || s.at(0) == '!' && s.pos == p {
+		if s.at(0) == '!' {
+			// A named or secondary handle ("!e!", "!!"): a suffix must follow.
 			s.skip()
 			handle = string(s.src[p-1 : s.pos])
 			b := s.scanURI(s.buf[:0], true, m)
 			s.buf = b
-			if len(b) == 0 && handle != "!!" {
-				s.fail(m, "did not find the expected tag suffix")
-				return
-			}
-			suffix = string(b)
 			if len(b) == 0 {
 				s.fail(m, "did not find the expected tag suffix")
 				return
 			}
+			suffix = string(b)
 		} else {
+			// The primary handle "!" with its suffix, or "!" alone.
 			s.reset(mark{p, s.line, m.col + 1})
 			b := s.scanURI(s.buf[:0], true, m)
 			s.buf = b
