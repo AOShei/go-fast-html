@@ -2,6 +2,7 @@ package gofasthtml
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -57,6 +58,15 @@ func TestSubtitleCorpus(t *testing.T) {
 				case timedOut:
 					c.timeouts++
 					t.Errorf("%s/%s: %s timed out", set, format, name)
+					continue
+				case errors.Is(err, ErrEncodingUnknown):
+					// Refused as plain text is: the encoding is not
+					// certain from the bytes (windows-1256, -1255, -874,
+					// Central European code pages).
+					c.add(c.errors, "encoding unknown")
+					if set == "dev" {
+						t.Logf("dev/%s/%s: %v", format, name, err)
+					}
 					continue
 				case err != nil:
 					c.add(c.errors, errKind(err))

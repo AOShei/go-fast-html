@@ -14,11 +14,13 @@
   header lines to `Metadata.Extra` (`vtt.`), `Language` to
   `Metadata.Language`. `Detect` reads `.srt`, `.vtt`, `.webvtt` and the
   WebVTT signature; the command has `-as srt` and `-as vtt`. UTF-32 with a
-  byte order mark is decoded for these two formats, and text of no
-  certain encoding is read as windows-1252 with `text.encoding_detected`
-  rather than refused. See the README's "Subtitles".
-- The 57 SubRip and 83 WebVTT files of the corpus's dev set read with no
-  error and pass `Validate`, with every block's words in the input at its
+  byte order mark is decoded for these two formats; text of no certain
+  encoding is refused with `ErrEncodingUnknown`, as plain text is. See
+  the README's "Subtitles".
+- Of the 57 SubRip and 83 WebVTT files of the corpus's dev set, 5 SubRip
+  files in code pages not certain from their bytes (Arabic, Hebrew, Thai,
+  Hungarian, Polish) are refused with `ErrEncodingUnknown`; the others
+  read with no error and pass `Validate`, with every block's words in the input at its
   `Loc` and one cue per line with `-->` (`TestSubtitleCorpus`).
 
 ## v0.4.4 (2026-11-24)

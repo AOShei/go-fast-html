@@ -243,7 +243,9 @@ func SRT(ctx context.Context, src []byte, yield func(*Item) bool) error {
 			}
 		}
 		if len(body) <= MaxText {
-			body = append(body, l.text...)
+			// A line's trailing white space is not text, as in a text
+			// file.
+			body = append(body, bytes.TrimRight(l.text, " \t")...)
 		} else {
 			over = true
 		}
@@ -354,7 +356,7 @@ func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error
 				}
 				lines++
 				if len(body) <= MaxText {
-					body = append(body, n.text...)
+					body = append(body, bytes.TrimRight(n.text, " \t")...)
 				} else {
 					over = true
 				}

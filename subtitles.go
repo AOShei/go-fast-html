@@ -65,10 +65,10 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 		encName = map[bool]string{true: "utf-32be", false: "utf-32le"}[be]
 	} else {
 		enc := charset.SniffText(src, label)
-		// Text whose encoding is not certain is read as windows-1252,
-		// with text.encoding_detected, as an EPUB chapter is: a file of
-		// cues is not refused for the letters of its text.
-		if err := t.sniffed(&enc, true); err != nil {
+		// Text whose encoding is not certain is refused with
+		// ErrEncodingUnknown, as plain text is: read in a guessed
+		// encoding, Arabic, Hebrew or Thai would be garbage.
+		if err := t.sniffed(&enc, false); err != nil {
 			return nil, err
 		}
 		var m *charset.Map

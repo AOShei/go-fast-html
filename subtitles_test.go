@@ -267,13 +267,10 @@ func TestSubtitleEncodings(t *testing.T) {
 			t.Errorf("utf-32 be=%v: %q %s", be, got, warnCodes(doc))
 		}
 	}
-	// Bytes of no certain encoding: read as windows-1252, with
-	// text.encoding_detected.
+	// Bytes of no certain encoding: refused, as plain text is.
 	src = "1\n00:00:01,000 --> 00:00:02,000\na\x81\x8D\x8F\x90\x9Db\n"
-	doc = subExtract(t, "srt", src, nil)
-	if ws := warnCodes(doc); !strings.Contains(ws, gofastcore.WarnTextEncodingDetected) || !strings.Contains(ws, "5 control characters") ||
-		len(doc.Parts[0].Blocks) != 1 {
-		t.Errorf("undetermined: %s", warnCodes(doc))
+	if _, err := (&Extractor{Format: "srt"}).Extract(context.Background(), strings.NewReader(src), int64(len(src)), nil); !errors.Is(err, ErrEncodingUnknown) {
+		t.Errorf("undetermined: %v", err)
 	}
 	// windows-1252 given as the transport encoding.
 	src = "1\n00:00:01,000 --> 00:00:02,000\ncaf\xE9\n"
