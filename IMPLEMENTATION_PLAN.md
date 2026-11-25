@@ -58,8 +58,20 @@ go-fast-core v0.1.1, schema 0.2.
   EUC-KR, Big5 with HKSCS) and `Extractor.Charset` / `-charset`.
 - `iframe srcdoc`, read in place, with depth counted against
   `Extractor.MaxDepth` and bytes against the decode and text budgets.
+- Subtitles: SubRip and WebVTT (`subtitles.go`, `internal/subtitle`), a
+  paragraph per cue with its timings, settings, voices and byte offsets;
+  WebVTT NOTE, STYLE, REGION and header; UTF-32 decoded for these two
+  formats. Table tests, `FuzzSubtitles`, and `TestSubtitleCorpus` with
+  two oracles (words at `Loc`; one cue per `-->` line) on the dev files.
 
 ## Open
+
+- Subtitles: MicroDVD (`{start}{end}text`, frame numbers) is not read as
+  cues; such a file read as `srt` is one paragraph. Arrows written other
+  than `-->` (`- >`, `->`) are text. WebVTT cue settings are kept as
+  written, not parsed; `X-TIMESTAMP-MAP` is kept in `vtt.header` as
+  written. A cue counted with no text says so in `input.repaired`, which
+  core describes as damage; a code of core's own for it may fit better.
 
 - Encodings: GB18030, ISO-8859-2..16, KOI8, EUC-JP and ISO-2022-JP are
   read as windows-1252 with `html.charset_unsupported`.

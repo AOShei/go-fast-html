@@ -5,11 +5,11 @@
 //	gofasthtml [flags] file-or-directory...
 //
 // The format of each input is decided by its extension (.html, .htm,
-// .md, .markdown, .txt, .epub, .csv, .tsv, .ipynb, .json, .yaml, .mht, ...) and, failing
-// that, by its content: an EPUB's mimetype member, or markup; -as sets it. A directory
+// .md, .markdown, .txt, .epub, .csv, .tsv, .ipynb, .json, .yaml, .mht,
+// .srt, .vtt, ...) and, failing that, by its content: an EPUB's mimetype
+// member, a WebVTT signature, or markup; -as sets it. A directory
 // stands for the HTML, Markdown, text, EPUB, CSV, TSV, notebook, JSON,
-// YAML and MHTML files
-// in it and
+// YAML, MHTML, SubRip and WebVTT files in it and
 // below it; "-" is
 // standard input. With one input the
 // JSON is indented; with several, each document is one line. Only the
@@ -56,6 +56,7 @@ var extensions = map[string]bool{
 	".csv":  true, ".tsv": true, ".tab": true, ".ipynb": true,
 	".json": true, ".jsonl": true, ".ndjson": true, ".geojson": true, ".yaml": true, ".yml": true,
 	".mht": true, ".mhtml": true,
+	".srt": true, ".vtt": true, ".webvtt": true,
 }
 
 // run is the command: it reads args and writes documents to stdout and
@@ -65,7 +66,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	flags.SetOutput(stderr)
 	var (
 		format   = flags.String("format", "json", "what to print: json, markdown or text")
-		as       = flags.String("as", "", "read every input as html, md, txt, epub, csv, tsv, ipynb, json, yaml or mht (default: by extension, else by content)")
+		as       = flags.String("as", "", "read every input as html, md, txt, epub, csv, tsv, ipynb, json, yaml, mht, srt or vtt (default: by extension, else by content)")
 		delim    = flags.String("delimiter", "", "the delimiter of csv and tsv input: one character, or \\t or tab for tab (default: a sep= first line, else tab for tsv, else sniffed for csv); a sep= first line overrides it")
 		noQuotes = flags.Bool("no-quotes", false, "read csv and tsv input with no quoting: a quote is a character like any other, and fields and rows end only at the delimiter and line ends")
 		header   = flags.Bool("header", false, "the first row of csv and tsv input is a header row, as the MIME parameter header=present declares")
@@ -111,9 +112,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return fail("unknown format %q: json, markdown or text", *format)
 	}
 	switch *as {
-	case "", "html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml", "mht":
+	case "", "html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml", "mht", "srt", "vtt":
 	default:
-		return fail("unknown value %q for -as: html, md, txt, epub, csv, tsv, ipynb, json, yaml or mht", *as)
+		return fail("unknown value %q for -as: html, md, txt, epub, csv, tsv, ipynb, json, yaml, mht, srt or vtt", *as)
 	}
 	var delimiter rune
 	switch *delim {

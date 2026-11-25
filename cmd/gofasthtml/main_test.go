@@ -88,6 +88,50 @@ func TestCommandEPUB(t *testing.T) {
 	}
 }
 
+func TestCommandSubtitles(t *testing.T) {
+	const srt = "1\n00:00:01,000 --> 00:00:02,000\n<i>Hello</i>\n\n2\n00:00:03,000 --> 00:00:04,000\nworld\n"
+	const vtt = "WEBVTT\n\nNOTE n\n\nc1\n00:01.000 --> 00:02.000\n<v Ann>Hi &amp; bye\n"
+	for _, tc := range []struct {
+		stdin string
+		args  []string
+		want  []string
+	}{
+		{srt, []string{"-as", "srt", "-"}, []string{"Hello", "world"}},
+		{vtt, []string{"-as", "vtt", "-"}, []string{"Hi & bye"}},
+		{vtt, []string{"-"}, []string{"Hi & bye"}}, // by its signature
+	} {
+		out, errs, code := cli(t, tc.stdin, tc.args...)
+		var doc gofastcore.Document
+		if code != 0 || json.Unmarshal([]byte(out), &doc) != nil || doc.Validate() != nil {
+			t.Fatalf("%v: exit %d: %s %s", tc.args, code, errs, out)
+		}
+		var got []string
+		for _, b := range doc.Parts[0].Blocks {
+			if b.Attrs["start"] != "" {
+				got = append(got, b.Text)
+			}
+		}
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Errorf("%v: %q", tc.args, got)
+		}
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.srt")
+	if err := os.WriteFile(path, []byte(srt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errs, code := cli(t, "", "-format", "text", dir)
+	if code != 0 || !strings.Contains(out, "Hello\n\nworld") {
+		t.Errorf("directory: exit %d: %s %q", code, errs, out)
+	}
+	out, errs, code = cli(t, "", path)
+	var doc gofastcore.Document
+	if code != 0 || json.Unmarshal([]byte(out), &doc) != nil || doc.Source.Format != "srt" ||
+		doc.Parts[0].Blocks[0].Attrs["start"] != "00:00:01.000" || doc.Parts[0].Blocks[0].Loc.Anchor != "1" {
+		t.Errorf("a.srt: exit %d: %s %s", code, errs, out)
+	}
+}
+
 func TestCommandCSV(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{"a.csv": "x;y\n1;2\n", "b.tsv": "p\tq\n", "c.tab": "r\ts\n", "d.dat": "u,v\n"} {

@@ -3,6 +3,34 @@
 ## Unreleased
 
 - **Web pages saved as one file (MHTML, `.mht`, `.mhtml`)**, format `mht`, as Chrome, Edge, Internet Explorer, UnMHT and WebKit save them. The page is read as HTML into the body, with the images it shows taken from the file; images it does not show are stored manifest items, frames and other files embedded documents, style sheets and fonts not listed. The file's header adds the title, the date saved, the saving program and the page's address to the metadata. Images a page shows through `srcset` or `<picture>` are found in the file. `Detect` knows the extensions and the header of a saved page. The command reads `.mht` and `.mhtml` files in a directory, takes `-as mht`, and reads an HTML child with the charset of its media type. Over the public corpus's 40 MHTML files (Chromium's test files and pages saved by Chrome): no error, no Validate failure.
+- **Subtitles and captions: SubRip (`srt`) and WebVTT (`vtt`).** One part
+  of kind `body`, a `paragraph` per cue in file order: its text as a viewer
+  sees it (markup removed, WebVTT character references decoded, lines
+  joined with `\n`), `Loc.Offset`/`Length` from the cue's identifier or
+  timing line to its last text line, `Loc.Anchor` the WebVTT identifier or
+  SubRip number, and `Attrs` `start` and `end` (`HH:MM:SS.mmm`),
+  `settings` and `voice`. With `Options.Spans`, bold, italic and underline.
+  WebVTT `NOTE` blocks are notes stored as markup comments where they
+  stand, `STYLE` blocks go to the stored part, `REGION` definitions and
+  header lines to `Metadata.Extra` (`vtt.`), `Language` to
+  `Metadata.Language`. `Detect` reads `.srt`, `.vtt`, `.webvtt` and the
+  WebVTT signature; the command has `-as srt` and `-as vtt`. UTF-32 with a
+  byte order mark is decoded for these two formats; text of no certain
+  encoding is refused with `ErrEncodingUnknown`, as plain text is. See
+  the README's "Subtitles".
+- Line ends CR LF, LF, CR and CR CR LF; in WebVTT only an empty line ends
+  a block or the header; U+FEFF around a SubRip cue number is ignored.
+  WebVTT tags nest up to `Extractor.MaxDepth`, deeper ones ignored with
+  `limit.exceeded`. Reading is linear in the input: unclosed tags and
+  override codes, long headers, repeated header keys and many voices
+  were quadratic before release.
+- Of the 57 SubRip and 83 WebVTT files of the corpus's dev set, 5 SubRip
+  files in code pages not certain from their bytes (Arabic, Hebrew, Thai,
+  Hungarian, Polish) are refused with `ErrEncodingUnknown`; the other 52
+  give 4,859 cues, the WebVTT files 134 cues, 6 notes and 10 stored
+  blocks. All read files pass `Validate`, with every block's words in the
+  input at its `Loc` and one cue per line with `-->`
+  (`TestSubtitleCorpus`).
 
 ## v0.4.4 (2026-11-24)
 
