@@ -348,7 +348,7 @@ func (s *scanner) scanToNextToken() {
 			s.spaced = true
 		}
 		if s.at(0) == '#' && !s.eof() {
-			if !s.spaced {
+			if !s.spaced && s.col != 0 {
 				s.fail(s.here(), "a comment must be separated from other tokens by white space")
 				return
 			}
@@ -518,6 +518,10 @@ func (s *scanner) fetchDocIndicator(start bool) {
 		k = tokDocumentStart
 	}
 	s.add(token{kind: k, start: m, end: s.here()})
+	if !start {
+		// Only a comment may follow "..." on its line.
+		s.endOfLine(m)
+	}
 }
 
 func (s *scanner) fetchFlowStart(mapping bool) {
@@ -1191,6 +1195,10 @@ func (s *scanner) fetchBlockScalar(literal bool) {
 		end = s.here()
 		if s.eof() {
 			lineStart = end
+			if blankOnly(s.src[p:s.pos]) {
+				// A last line of white space ends as if broken.
+				lb = append(lb, '\n')
+			}
 			break
 		}
 		lb = append(lb, '\n')
@@ -1226,6 +1234,19 @@ func (s *scanner) blockBreaks(indent, minIndent int, tb []byte, ls *mark) (int, 
 		for (indent < 0 || s.col < indent) && s.at(0) == ' ' {
 			s.skip()
 		}
+		if s.at(0) == '\t' && (indent < 0 && s.col < minIndent || indent >= 0 && s.col < indent) {
+			s.fail(s.here(), "found a tab character where an indentation space is expected")
+			return indent, tb
+		}
+		if s.eof() && s.pos > ls.pos {
+			// A last line of spaces ends as if broken.
+			if s.col > maxEmpty {
+				maxEmpty = s.col
+			}
+			tb = append(tb, '\n')
+			*ls = s.here()
+			break
+		}
 		if !s.isBreak(0) {
 			break
 		}
@@ -1244,11 +1265,16 @@ func (s *scanner) blockBreaks(indent, minIndent int, tb []byte, ls *mark) (int, 
 			}
 		} else {
 			indent = max(maxEmpty, minIndent)
-			if indent == 0 && s.col == 0 && !s.eof() {
-				// Nothing at column 0 is content when no line was.
-				indent = 1
-			}
 		}
 	}
 	return indent, tb
+}
+
+func blankOnly(b []byte) bool {
+	for _, c := range b {
+		if c != ' ' && c != '\t' {
+			return false
+		}
+	}
+	return len(b) > 0
 }
