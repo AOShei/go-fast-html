@@ -151,6 +151,8 @@ type dSplitter struct {
 	doc string
 	// scanned is where trailing has looked for comments up to.
 	scanned int
+	// noComment: the text from lastEnd to it has no comment (gapComment).
+	noComment int
 	// head is where the text of the outermost container split since the
 	// last block begins (its key, the comments above it): the next block
 	// begins there, so that no line of the file is left out. -1 if none.
@@ -480,9 +482,13 @@ func (s *dSplitter) gapComment(start int) int {
 	if s.comment == nil {
 		return start
 	}
-	if i := s.commentIn(s.lastEnd, start); i >= 0 {
+	// What was looked at before, with no comment in it, is not looked at
+	// again: with no block made since, every look would start at lastEnd.
+	from := max(s.lastEnd, s.noComment)
+	if i := s.commentIn(from, start); i >= 0 {
 		return i
 	}
+	s.noComment = max(s.noComment, start)
 	return start
 }
 
