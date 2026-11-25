@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("Content-Type:\xe8\x03ultipart/related; boundary=b\n\n--b\nContent-Type: multipart/alternative; boundary=c\n\n--c\nContent-Type: text/html\n\n<p>x\n--c--\n--b\nContent-Location: x.png\nContent-Type: image/png\n\nzz--b--")

@@ -94,24 +94,27 @@ const (
 )
 
 // Extractor extracts HTML, Markdown, plain text, EPUB, comma- and
-// tab-separated values, Jupyter notebooks, and JSON and YAML as text. The
+// tab-separated values, Jupyter notebooks, JSON and YAML as text, and web
+// pages saved as one file (MHTML). The
 // zero value is ready to use and safe for concurrent use.
 type Extractor struct {
 	// Format is the format to read the input as: "html", "md", "txt",
-	// "epub", "csv", "tsv", "ipynb", "json" or "yaml". Empty means to
+	// "epub", "csv", "tsv", "ipynb", "json", "yaml" or "mht". Empty means to
 	// decide it with Detect.
 	Format string
 	// MaxDepth bounds how deeply elements nest in the tree that is read.
 	// Zero means DefaultMaxDepth.
 	MaxDepth int
-	// MaxArchiveMembers bounds the number of files in an EPUB's archive.
+	// MaxArchiveMembers bounds the number of files in an EPUB's archive,
+	// and the number of parts of an MHTML file.
 	// Zero means DefaultMaxArchiveMembers; negative means no limit.
 	MaxArchiveMembers int
 	// Charset is the character encoding the input comes with from outside
 	// it, as a label such as the charset parameter of a MIME Content-Type
 	// gives it ("windows-1251", "shift_jis"): the transport-layer encoding
 	// of the WHATWG encoding sniffing. It applies to HTML, Markdown, plain
-	// text, CSV, TSV, JSON and YAML, not to the chapters of an EPUB. A byte order mark
+	// text, CSV, TSV, JSON and YAML, and to the page of an MHTML file whose
+	// part declares no charset; not to the chapters of an EPUB. A byte order mark
 	// overrides it; it overrides a <meta> declaration and detection. A
 	// label that names no encoding this library decodes is ignored, with
 	// the warning html.charset_unsupported. Empty means none.
@@ -140,11 +143,11 @@ var _ gofastcore.Extractor = (*Extractor)(nil)
 
 var mimeTypes = map[string]string{"html": "text/html", "md": "text/markdown", "txt": "text/plain", "epub": "application/epub+zip",
 	"csv": "text/csv", "tsv": "text/tab-separated-values", "ipynb": "application/x-ipynb+json",
-	"json": "application/json", "yaml": "application/yaml"}
+	"json": "application/json", "yaml": "application/yaml", "mht": "multipart/related"}
 
 // Formats lists the formats this library extracts.
 func (e *Extractor) Formats() []string {
-	return []string{"html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml"}
+	return []string{"html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml", "mht"}
 }
 
 // Detect decides the format of an input from its name, and failing that
@@ -152,7 +155,11 @@ func (e *Extractor) Formats() []string {
 // HTML; .md, .markdown, .mdown, .mkd, .mkdn or .mdwn Markdown; .txt or
 // .text plain text; .epub EPUB; .csv comma-separated values; .tsv or
 // .tab tab-separated values; .ipynb a Jupyter notebook; .json, .jsonl,
-// .ndjson or .geojson JSON; .yaml or .yml YAML. A zip archive
+// .ndjson or .geojson JSON; .yaml or .yml YAML; .mht or .mhtml a web
+// page saved as one file (MHTML). A file whose header is that of an MHTML
+// file a browser saved (a Snapshot-Content-Location field, or From
+// "<Saved by ...>", with a multipart/related Content-Type) is MHTML
+// whatever its name. A zip archive
 // whose first member is "mimetype" saying application/epub+zip is EPUB
 // whatever its name.
 // Without one of those, an input that begins with
@@ -181,9 +188,14 @@ func Detect(name string, src []byte) string {
 		return "json"
 	case ".yaml", ".yml":
 		return "yaml"
+	case ".mht", ".mhtml":
+		return "mht"
 	}
 	if bytes.HasPrefix(src, []byte("PK\x03\x04")) && len(src) >= 58 && string(src[30:58]) == "mimetypeapplication/epub+zip" {
 		return "epub"
+	}
+	if isMHTML(src) {
+		return "mht"
 	}
 	head := src[:min(len(src), 4096)]
 	if bytes.HasPrefix(head, []byte{0xFF, 0xFE}) || bytes.HasPrefix(head, []byte{0xFE, 0xFF}) {
@@ -341,6 +353,9 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	}
 	if format == "csv" || format == "tsv" {
 		return e.csv(ctx, doc, src, format, opts, text, decode)
+	}
+	if format == "mht" {
+		return e.mhtml(ctx, doc, src, opts, text, decode)
 	}
 	if format == "ipynb" {
 		return e.notebook(ctx, doc, src, opts, text, decode)

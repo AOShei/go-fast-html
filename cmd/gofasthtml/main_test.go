@@ -260,3 +260,23 @@ func TestCommand(t *testing.T) {
 		t.Errorf("input limit: %d %q", code, errs)
 	}
 }
+
+func TestCommandMHTML(t *testing.T) {
+	dir := t.TempDir()
+	src := "From: <Saved by Blink>\r\nSubject: Saved\r\nContent-Type: multipart/related; type=\"text/html\"; boundary=B\r\n\r\n" +
+		"--B\r\nContent-Type: text/html\r\nContent-Location: https://example.org/\r\n\r\n<p>the page</p><iframe src=\"cid:f\"></iframe>\r\n" +
+		"--B\r\nContent-Type: text/html; charset=windows-1252\r\nContent-ID: <f>\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n<p>the frame: caf=E9</p>\r\n--B--\r\n"
+	if err := os.WriteFile(filepath.Join(dir, "page.mht"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The directory walk takes the file; the frame is read with its charset.
+	out, errs, code := cli(t, "", "-format", "text", dir)
+	if code != 0 || !strings.Contains(out, "the page") || !strings.Contains(out, "the frame: café") {
+		t.Fatalf("code %d, out %q, stderr %q", code, out, errs)
+	}
+	out, _, code = cli(t, src, "-as", "mht", "-")
+	var doc gofastcore.Document
+	if code != 0 || json.Unmarshal([]byte(out), &doc) != nil || doc.Source.Format != "mht" || len(doc.Children) != 1 {
+		t.Fatalf("code %d, %q", code, out)
+	}
+}

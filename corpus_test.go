@@ -55,7 +55,7 @@ func errKind(err error) string {
 	return "other"
 }
 
-// TestCorpus extracts every html, md and epub file of the public corpus,
+// TestCorpus extracts every html, md, epub and mht file of the public corpus,
 // dev and held-out, and tallies the outcome. It fails on a panic, a
 // Validate failure or a timeout. Held-out files are reported in
 // aggregate only; the display reasons of dev files are listed one by one.
@@ -67,7 +67,7 @@ func TestCorpus(t *testing.T) {
 	opts := &gofastcore.Options{Limits: gofastcore.Limits{
 		MaxInputBytes: 64 << 20, MaxDecodedBytes: 128 << 20, MaxTextBytes: 32 << 20}}
 	for _, set := range []string{"dev", "heldout"} {
-		for _, format := range []string{"html", "md", "epub"} {
+		for _, format := range []string{"html", "md", "epub", "mht"} {
 			dir := filepath.Join(root, set, format)
 			ents, err := os.ReadDir(dir)
 			if err != nil {

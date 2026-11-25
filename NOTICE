@@ -72,3 +72,8 @@ gen/gen_cjk_extra.py, and the decoding in cjk.go
 
 internal/charset/testdata/text
   The texts of testdata/detect in UTF-8, written for these tests.
+
+internal/mimepart/header.go, multipart.go, decode.go and the tests
+TestParseHeader, TestTransferDecoding, TestSplit, TestHeaderValuesApart
+  Copied from go-fast-email v0.2.1 (internal/rfc822), same author and
+  licence.
