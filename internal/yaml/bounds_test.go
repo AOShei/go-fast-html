@@ -171,6 +171,8 @@ func TestValues(t *testing.T) {
 		{"- &a !local x\n- *a\n", "x|a"},
 		{"[a:b, c: d, \"e\":f]", "a:b|c|d|e|f"},
 		{"- x # comment\n- y#z\n", "x|y#z"},
+		{`{"a":[1,2,{"b":null}],"c":"d","e":{}}`, "a|1|2|b|null|c|d|e"},
+		{"{\n  \"k\": [\n    true,\n    \"v\"\n  ]\n}\n", "k|true|v"},
 	}
 	for _, tt := range tests {
 		p := NewParser([]byte(tt.src), Limits{})
