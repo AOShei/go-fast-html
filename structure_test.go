@@ -138,13 +138,15 @@ func TestStructJSONRecords(t *testing.T) {
 	doc := dataDoc(t, "r.json", b.String(), nil)
 	got := structBlocks(t, doc, b.String())
 	// The run of 300 records is a table; the nested object ends it; a
-	// lone record after it is a member like any other.
-	if len(got) != 3 || got[0].kind != gofastcore.KindCode || got[0].anchor != "meta" ||
-		got[1].kind != gofastcore.KindTable || got[1].anchor != "rows[0]" || got[1].end != "rows[299]" ||
-		got[2].kind != gofastcore.KindCode || got[2].anchor != "rows[300]" || got[2].end != "rows[302]" {
+	// lone record after it is a member like any other. The key line
+	// before the table is a block of its own, at the array's path.
+	if len(got) != 4 || got[0].kind != gofastcore.KindCode || got[0].anchor != "meta" ||
+		got[1].kind != gofastcore.KindCode || got[1].text != `"rows": [` || got[1].anchor != "rows" || got[1].end != "" ||
+		got[2].kind != gofastcore.KindTable || got[2].anchor != "rows[0]" || got[2].end != "rows[299]" ||
+		got[3].kind != gofastcore.KindCode || got[3].anchor != "rows[300]" || got[3].end != "rows[302]" {
 		t.Fatalf("%+v", got)
 	}
-	tb := doc.Parts[0].Blocks[1].Table
+	tb := doc.Parts[0].Blocks[2].Table
 	if len(tb.Rows) != 301 || tb.Rows[0][1] != "name" || tb.Rows[300][1] != `"row 299"` || tb.RowLocs[300].Anchor != "rows[299]" {
 		t.Errorf("table: %d rows, %q", len(tb.Rows), tb.Rows[0])
 	}
@@ -216,12 +218,28 @@ func TestStructYAML(t *testing.T) {
 	b.WriteString("  - &x {name: 'Q', age: *a}\n")
 	doc := dataDoc(t, "p.yaml", b.String(), nil)
 	got := structBlocks(t, doc, b.String())
-	if len(got) != 1 || got[0].kind != gofastcore.KindTable || got[0].anchor != "people[0]" || got[0].end != "people[200]" {
+	// The key line is a block of its own; a mapping with an anchor is not
+	// a record (a row would not show it).
+	if len(got) != 3 || got[0].kind != gofastcore.KindCode || got[0].text != "people:" || got[0].anchor != "people" ||
+		got[1].kind != gofastcore.KindTable || got[1].anchor != "people[0]" || got[1].end != "people[199]" ||
+		got[2].kind != gofastcore.KindCode || got[2].text != "  - &x {name: 'Q', age: *a}" || got[2].anchor != "people[200]" {
 		t.Fatalf("%+v", got)
 	}
-	tb := doc.Parts[0].Blocks[0].Table
-	if tb.Rows[1][0] != `"P 0"` || tb.Rows[201][0] != "'Q'" || tb.Rows[201][1] != "*a" {
-		t.Errorf("rows %q %q", tb.Rows[1], tb.Rows[201])
+	tb := doc.Parts[0].Blocks[1].Table
+	if tb.Rows[1][0] != `"P 0"` || tb.Rows[200][0] != `"P 199"` {
+		t.Errorf("rows %q %q", tb.Rows[1], tb.Rows[200])
+	}
+	// A cell keeps its anchor and tag, an alias as written.
+	b.Reset()
+	b.WriteString("people:\n")
+	for i := range 200 {
+		fmt.Fprintf(&b, "  - name: \"P %d\"\n    age: %d\n", i, i)
+	}
+	b.WriteString("  - {name: &q 'Q', age: *a, id: !!str 7}\n")
+	doc = dataDoc(t, "q.yaml", b.String(), nil)
+	tb = doc.Parts[0].Blocks[1].Table
+	if r := tb.Rows[201]; r[0] != "&q 'Q'" || r[1] != "*a" || r[2] != "!!str 7" {
+		t.Errorf("row %q", r)
 	}
 }
 

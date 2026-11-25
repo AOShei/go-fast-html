@@ -133,7 +133,9 @@ func (e *Extractor) yamlStructure(ctx context.Context, src []byte, m *charset.Ma
 		var dev dEvent
 		switch ev.Kind {
 		case yaml.MappingStart, yaml.SequenceStart:
-			dev = dEvent{kind: evOpen, obj: ev.Kind == yaml.MappingStart, start: start}
+			// A mapping with an anchor or a tag is not a record: a row
+			// would not show them.
+			dev = dEvent{kind: evOpen, obj: ev.Kind == yaml.MappingStart, start: start, props: ev.PropStart < ev.Start}
 			stack = append(stack, open{mapping: ev.Kind == yaml.MappingStart, atKey: true})
 		case yaml.MappingEnd, yaml.SequenceEnd:
 			stack = stack[:len(stack)-1]
@@ -143,7 +145,12 @@ func (e *Extractor) yamlStructure(ctx context.Context, src []byte, m *charset.Ma
 			dev = dEvent{kind: evClose, end: ev.End}
 			hasKey = false
 		case yaml.Scalar, yaml.Alias:
-			dev = dEvent{kind: evScalar, start: start, end: ev.End, cell: dCell{text: yamlCell(ev), set: true}}
+			cell := yamlCell(ev)
+			if ev.Kind == yaml.Scalar && ev.PropStart < ev.Start {
+				// The anchor and tag as written, before the value.
+				cell = strings.TrimSpace(string(src[ev.PropStart:ev.Start])) + " " + cell
+			}
+			dev = dEvent{kind: evScalar, start: start, end: ev.End, cell: dCell{text: cell, set: true}}
 		}
 		if hasKey {
 			dev.key, dev.hasKey = keyRef{s: key, set: true}, true

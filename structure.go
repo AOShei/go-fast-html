@@ -61,6 +61,7 @@ type keyRef struct {
 type dEvent struct {
 	kind   dEvKind
 	obj    bool   // evOpen: an object or mapping
+	props  bool   // evOpen: a YAML node with an anchor or a tag
 	start  int    // the member's start: its key's for a member of an object
 	end    int    // evClose, evScalar, evRaw, evDocEnd: the end
 	key    keyRef // a member of an object
@@ -99,6 +100,8 @@ type dFrame struct {
 	n       int     // members so far
 	flat    bool    // an object whose members so far are all scalars
 	cells   []dCell
+	// the start and end of the last member taken while split
+	lastStart, last int
 	path    string
 	pathSet bool
 	// pathLong: the path is longer than maxPath; its members have none.
@@ -119,6 +122,7 @@ type dRun struct {
 	colOf  map[string]int
 	pieces int // tables already made from the run
 	start  int
+	end    int // the end of the last row
 }
 
 // dSplitter makes the blocks of one JSON or YAML file.
@@ -171,7 +175,7 @@ func (s *dSplitter) event(ev dEvent) bool {
 			p.flat = false
 		}
 		f := s.newFrame()
-		f.obj, f.unit, f.flat = ev.obj, u, ev.obj
+		f.obj, f.unit, f.flat = ev.obj, u, ev.obj && !ev.props
 		s.stack = append(s.stack, f)
 	case evScalar, evRaw:
 		s.check(ev.end)
@@ -202,8 +206,7 @@ func (s *dSplitter) event(ev dEvent) bool {
 		// paths can be written.
 		switch {
 		case f.split:
-			s.flushRun(f)
-			s.flushGroup(f)
+			s.closeSplit(f, ev.end)
 		case p == nil && !f.obj && len(f.kids) >= 2 && allRecords(f.kids):
 			// A top-level array of records is a table.
 			s.becomeSplit(f, nil)
@@ -216,7 +219,7 @@ func (s *dSplitter) event(ev dEvent) bool {
 		s.firstUnsplit = min(s.firstUnsplit, len(s.stack))
 		if p != nil && !f.split {
 			u := f.unit
-			if f.obj && f.flat && f.n > 0 && f.n <= MaxCSVColumns && !p.obj {
+			if f.obj && f.flat && f.n > 0 && f.n <= MaxCSVColumns && !p.obj && s.distinctKeys(f.cells) {
 				u.record = true
 				u.cells = append([]dCell(nil), f.cells...)
 			}
@@ -262,6 +265,32 @@ func (s *dSplitter) release(f *dFrame) {
 	*f = dFrame{kids: kids, cells: cells}
 	f.run.rows = rows
 	s.free = append(s.free, f)
+}
+
+// distinctKeys reports whether no key is in cells twice: an object with a
+// key twice is not a record, as a row would show one of its values only.
+func (s *dSplitter) distinctKeys(cells []dCell) bool {
+	if len(cells) <= 16 {
+		var keys [16]string
+		for i := range cells {
+			keys[i] = s.keyText(cells[i].key)
+			for j := range i {
+				if keys[i] == keys[j] {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	seen := make(map[string]struct{}, len(cells))
+	for _, c := range cells {
+		k := s.keyText(c.key)
+		if _, ok := seen[k]; ok {
+			return false
+		}
+		seen[k] = struct{}{}
+	}
+	return true
 }
 
 func allRecords(us []dUnit) bool {
@@ -316,6 +345,13 @@ func (s *dSplitter) add(p *dFrame, u dUnit) {
 	if !p.split {
 		p.kids = append(p.kids, u)
 		return
+	}
+	p.lastStart, p.last = u.start, u.end
+	r := &p.run
+	if (len(r.rows) > 0 || r.pieces > 0) && s.comment != nil && s.commentIn(r.end, u.start) >= 0 {
+		// A comment between two records ends the run: a table holds
+		// values only, and the comment is the text before the next one.
+		s.flushRun(p)
 	}
 	if !p.obj && u.record && s.fits(p, u) {
 		s.addRow(p, u)
@@ -372,10 +408,22 @@ func (s *dSplitter) emit(p *dFrame, first, last dUnit) {
 		return
 	}
 	start, end := s.extendStart(first.start), s.extendEnd(last.end)
-	start = s.headed(max(start, s.lastEnd))
+	start = s.gapComment(s.headed(max(start, s.lastEnd)))
 	if start >= end {
 		return
 	}
+	anchor, pathEnd := "", ""
+	if p != nil {
+		anchor = s.path(p, first)
+		if first.start != last.start || first.index != last.index {
+			pathEnd = s.path(p, last)
+		}
+	}
+	s.block(start, end, anchor, pathEnd)
+}
+
+// block makes a code block of the text from start to end.
+func (s *dSplitter) block(start, end int, anchor, pathEnd string) {
 	text := s.clean(s.src[start:end])
 	if strings.TrimSpace(text) == "" {
 		s.lastEnd = end // nothing but control characters and white space
@@ -415,14 +463,52 @@ func (s *dSplitter) emit(p *dFrame, first, last dUnit) {
 	if s.doc != "" {
 		b.Attrs[AttrDocument] = s.doc
 	}
-	if p != nil {
-		b.Loc.Anchor = s.path(p, first)
-		if first.start != last.start || first.index != last.index {
-			b.Attrs[AttrPathEnd] = s.path(p, last)
-		}
+	b.Loc.Anchor = anchor
+	if pathEnd != "" {
+		b.Attrs[AttrPathEnd] = pathEnd
 	}
 	s.part.Blocks = append(s.part.Blocks, b)
 	s.lastEnd = end
+}
+
+// gapComment returns where the first comment in the text between the
+// last block's end and start begins, if there is one; else start. Text
+// there is in no block: only a comment may be, and it is kept.
+func (s *dSplitter) gapComment(start int) int {
+	if s.comment == nil {
+		return start
+	}
+	if i := s.commentIn(s.lastEnd, start); i >= 0 {
+		return i
+	}
+	return start
+}
+
+// commentIn returns the offset of the first comment between from and to,
+// text that is no value, or -1.
+func (s *dSplitter) commentIn(from, to int) int {
+	for i := from; i < to; i++ {
+		switch c := s.src[i]; {
+		case s.format == "json" && c == '/' && i+1 < to && (s.src[i+1] == '/' || s.src[i+1] == '*'):
+			return i
+		case s.format == "yaml" && c == '#' && (i == 0 || s.src[i-1] == ' ' || s.src[i-1] == '\t' || s.src[i-1] == '\n' || s.src[i-1] == '\r'):
+			return i
+		}
+	}
+	return -1
+}
+
+// onlyPunct reports whether b holds only white space, commas and
+// brackets.
+func onlyPunct(b []byte) bool {
+	for _, c := range b {
+		switch c {
+		case ' ', '\t', '\r', '\n', ',', '[', ']', '{', '}':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // headed returns where a block that would begin at start begins: at
@@ -453,6 +539,7 @@ func (s *dSplitter) addRow(p *dFrame, u dUnit) {
 		}
 	}
 	r.rows = append(r.rows, u)
+	r.end = u.end
 	if len(r.rows) == 2 && r.pieces == 0 {
 		// A run of two records is a table: what is before it is made
 		// first. (A lone record joins the members around it.)
@@ -461,6 +548,84 @@ func (s *dSplitter) addRow(p *dFrame, u dUnit) {
 	if len(r.rows) >= csvRowsPerBlock || len(r.rows)*len(r.cols) >= csvCellsPerBlock {
 		s.table(p)
 	}
+}
+
+// closeSplit makes the last blocks of the split container f, which ends
+// at end. A comment after its last member (before its closing bracket,
+// or its dedent) joins the last group when that is still to be made and
+// has room; else it is a block of its own, at f's path.
+func (s *dSplitter) closeSplit(f *dFrame, end int) {
+	cs, ce := -1, -1
+	if s.comment != nil && f.n > 0 {
+		if cs = s.commentIn(f.last, end); cs >= 0 {
+			// To the end of the comment's last line before end.
+			ce = end
+			for ce > cs && onlyPunct(s.src[ce-1:ce]) {
+				ce--
+			}
+			// A line comment runs to its line's end, brackets and all.
+			ls := ce
+			for ls > cs && s.src[ls-1] != '\n' && s.src[ls-1] != '\r' {
+				ls--
+			}
+			if i := s.commentIn(ls, ce); i >= 0 && (s.format == "yaml" || s.src[i+1] == '/') {
+				le, _ := lineAt(s.src, i)
+				ce = min(le, end)
+			}
+		} else if s.format == "yaml" && end > 0 && s.src[end-1] != ']' && s.src[end-1] != '}' {
+			cs, ce = s.dedentComments(f, end)
+		}
+	}
+	g := &f.group
+	if cs >= 0 && len(f.run.rows) == 0 && g.n > 0 && ce-g.start <= s.limit {
+		g.end = ce
+		cs = -1
+	}
+	s.flushRun(f)
+	s.flushGroup(f)
+	if cs >= 0 && !s.spent {
+		if start := max(cs, s.lastEnd); start < ce {
+			s.block(start, ce, s.framePath(f), "")
+		}
+	}
+}
+
+// dedentComments returns the comment lines after the YAML block
+// collection f, which ends at end, that are indented at least as far as
+// its last member's line: they are its own, not the next member's. -1
+// when there are none.
+func (s *dSplitter) dedentComments(f *dFrame, end int) (cs, ce int) {
+	ind := 0
+	for i := lineStart(s.src, f.lastStart); i < f.lastStart && s.src[i] == ' '; i++ {
+		ind++
+	}
+	pos := max(end, s.lastEnd)
+	if pos > 0 && pos < len(s.src) && s.src[pos-1] != '\n' && s.src[pos-1] != '\r' {
+		_, pos = lineAt(s.src, pos) // the rest of end's line is extendEnd's
+	}
+	cs, ce = -1, -1
+	for pos < len(s.src) {
+		// Only the start of a line is looked at before it is taken.
+		i := pos
+		for i < len(s.src) && (s.src[i] == ' ' || s.src[i] == '\t') {
+			i++
+		}
+		le, next := 0, 0
+		switch {
+		case i == len(s.src) || s.src[i] == '\n' || s.src[i] == '\r':
+			_, next = lineAt(s.src, i)
+		case s.src[i] == '#' && i-pos >= ind:
+			le, next = lineAt(s.src, i)
+			if cs < 0 {
+				cs = pos
+			}
+			ce = le
+		default:
+			return cs, ce
+		}
+		pos = next
+	}
+	return cs, ce
 }
 
 // flushRun ends p's run: a lone record is a member like any other.
@@ -484,13 +649,24 @@ func (s *dSplitter) table(p *dFrame) {
 	if s.spent || len(r.rows) == 0 {
 		return
 	}
+	// The text before the first row that is in no block (the key of the
+	// container, the comments above) is a code block of its own: a table
+	// holds values only.
+	start := s.gapComment(s.headed(max(s.extendStart(r.rows[0].start), s.lastEnd)))
+	if pre := s.rowLine(r.rows[0].start); start < pre && !onlyPunct(s.src[start:pre]) {
+		s.block(start, pre, s.framePath(p), "")
+		if s.spent {
+			return
+		}
+		start = r.rows[0].start
+	}
 	width := len(r.cols)
 	t := &gofastcore.Table{HeaderRows: 1, Rows: make([][]string, 0, len(r.rows)+1),
 		RowLocs: make([]gofastcore.Location, 0, len(r.rows)+1)}
 	header := make([]string, width)
 	size := 0
 	for i, k := range r.cols {
-		header[i] = s.clean([]byte(k))
+		header[i] = gofastcore.ExpandLigatures(s.clean([]byte(k)))
 		size += len(header[i])
 	}
 	if !s.text.Take(gofastcore.BlockCost + gofastcore.CellCost*width + size) {
@@ -499,7 +675,6 @@ func (s *dSplitter) table(p *dFrame) {
 	}
 	t.Rows = append(t.Rows, header)
 	t.RowLocs = append(t.RowLocs, gofastcore.Location{})
-	start := s.headed(max(s.extendStart(r.rows[0].start), s.lastEnd))
 	end := r.rows[len(r.rows)-1].end
 	for _, u := range r.rows {
 		row := make([]string, width)
@@ -621,13 +796,8 @@ func lineStart(b []byte, pos int) int {
 func (s *dSplitter) extendStart(pos int) int {
 	// Back over the white space before pos only: a long line is not
 	// looked at again for each member on it.
-	ls := pos
-	for ls > 0 && s.src[ls-1] != '\n' && s.src[ls-1] != '\r' {
-		c := s.src[ls-1]
-		if c == ' ' || c == '\t' || s.format == "yaml" && c == '-' && ls < len(s.src) && (s.src[ls] == ' ' || s.src[ls] == '\t') {
-			ls--
-			continue
-		}
+	ls := s.rowLine(pos)
+	if ls == pos && pos > 0 && s.src[pos-1] != '\n' && s.src[pos-1] != '\r' {
 		return pos
 	}
 	if ls < s.lastEnd {
@@ -703,6 +873,21 @@ func (s *dSplitter) extendEnd(pos int) int {
 	return pos
 }
 
+// rowLine returns the start of pos's line when only white space (and, in
+// YAML, the "-" of sequence entries) is before pos there; else pos.
+func (s *dSplitter) rowLine(pos int) int {
+	ls := pos
+	for ls > 0 && s.src[ls-1] != '\n' && s.src[ls-1] != '\r' {
+		c := s.src[ls-1]
+		if c == ' ' || c == '\t' || s.format == "yaml" && c == '-' && ls < len(s.src) && (s.src[ls] == ' ' || s.src[ls] == '\t') {
+			ls--
+			continue
+		}
+		return pos
+	}
+	return ls
+}
+
 // lineStartAbove returns the start of the line that ends at pos, or -1
 // when it begins before floor (which is not looked past).
 func lineStartAbove(b []byte, pos, floor int) int {
@@ -740,6 +925,7 @@ func cleanCode(b []byte, controls *int) string {
 // cleanCell drops a cell's control characters other than tab and line
 // feed.
 func (s *dSplitter) cleanCell(v string) string {
+	v = gofastcore.ExpandLigatures(v)
 	if !hasControl(v) {
 		return v
 	}
