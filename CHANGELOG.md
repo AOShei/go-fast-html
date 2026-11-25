@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 (2026-11-25)
 
 - **Web pages saved as one file (MHTML, `.mht`, `.mhtml`)**, format `mht`, as Chrome, Edge, Internet Explorer, UnMHT and WebKit save them. The page is read as HTML into the body, with the images it shows taken from the file; images it does not show are stored manifest items, frames and other files embedded documents, style sheets and fonts not listed. The file's header adds the title, the date saved, the saving program and the page's address to the metadata. Images a page shows through `srcset` or `<picture>` are found in the file. `Detect` knows the extensions and the header of a saved page. The command reads `.mht` and `.mhtml` files in a directory, takes `-as mht`, and reads an HTML child with the charset of its media type. Over the public corpus's 40 MHTML files (Chromium's test files and pages saved by Chrome): no error, no Validate failure.
 - **Subtitles and captions: SubRip (`srt`) and WebVTT (`vtt`).** One part
