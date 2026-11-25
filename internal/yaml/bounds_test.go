@@ -105,9 +105,11 @@ func TestLinearTime(t *testing.T) {
 		}
 		big := sh.gen(4 * mib)
 		d4, _ := timeParse(big, runs)
-		// Under ~5x for 4x the input, with a floor against the noise of a
-		// shared machine (allocation of the larger values, collection).
-		if d4 > 5*d1+100*time.Millisecond {
+		// Under 6x for 4x the input (quadratic work would be 16x), with a
+		// floor against the noise of a shared machine or a CI runner
+		// (5.45x was seen once on a 32-bit runner for a shape that is 4.1x
+		// locally).
+		if d4 > 6*d1+250*time.Millisecond {
 			t.Errorf("%s: 1 MiB %v, 4 MiB %v", sh.name, d1, d4)
 		}
 		t.Logf("%-26s 1 MiB %8v  4 MiB %8v", sh.name, d1, d4)
