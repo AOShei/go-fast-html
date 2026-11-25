@@ -86,6 +86,9 @@ func timeParse(src []byte, runs int) (time.Duration, error) {
 }
 
 func TestLinearTime(t *testing.T) {
+	if raceEnabled {
+		t.Skip("timings under the race detector measure the detector")
+	}
 	const mib = 1 << 20
 	runs := 3
 	if testing.Short() {
