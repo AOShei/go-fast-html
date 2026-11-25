@@ -5,6 +5,7 @@ package gofasthtml
 
 import (
 	"context"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -62,8 +63,19 @@ func TestReviewSubtitlesVTTHeaderTextQuadratic(t *testing.T) {
 // WebVTT header lines "Key: value" with one key: each value is joined to
 // the 64 KiB already held by a new string of old+"\n"+v before the cut
 // (subtitles.go vttMetadata set), 64 KiB copied per five bytes of input.
+// It is measured by the bytes allocated, not by time, which a busy test
+// machine makes unreliable: copying 64 KiB a line allocates 26 GB here.
 func TestReviewSubtitlesVTTHeaderFieldsCopy(t *testing.T) {
-	reviewWithin(t, "vtt", "WEBVTT\n"+strings.Repeat("a: b\n", 400000)+"\n00:01.000 --> 00:02.000\nx\n", time.Second)
+	src := "WEBVTT\n" + strings.Repeat("a: b\n", 400000) + "\n00:01.000 --> 00:02.000\nx\n"
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	if _, err := (&Extractor{Format: "vtt"}).Extract(context.Background(), strings.NewReader(src), int64(len(src)), &gofastcore.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	runtime.ReadMemStats(&after)
+	if n := after.TotalAlloc - before.TotalAlloc; n > 256<<20 {
+		t.Fatalf("%d bytes of input allocated %d bytes", len(src), n)
+	}
 }
 
 // Many distinct voices in one cue: each <v> is looked up in the list of
