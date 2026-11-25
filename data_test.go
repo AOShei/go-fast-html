@@ -76,11 +76,11 @@ func TestDataYAMLDocuments(t *testing.T) {
 			t.Errorf("continued: %q", b.Text)
 		}
 		got = append(got, b.Text)
-		if src[b.Loc.Offset:b.Loc.Offset+b.Loc.Length] != b.Text+"\n" {
+		if src[b.Loc.Offset:b.Loc.Offset+b.Loc.Length] != b.Text {
 			t.Errorf("loc of %q: %q", b.Text, src[b.Loc.Offset:b.Loc.Offset+b.Loc.Length])
 		}
 	}
-	want := []string{"# config\na: 1", "---\nb:\n  - x", "--- !tag\nc: 3\n..."}
+	want := []string{"# config\na: 1", "b:\n  - x", "!tag\nc: 3"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("documents: %q", got)
 	}
@@ -123,7 +123,7 @@ func TestDataSplit(t *testing.T) {
 	// A value is never cut: one longer than a block is a block of its own.
 	long := strings.Repeat("\u00e9", dataBlockBytes)
 	doc = dataDoc(t, "l.json", "[\n1,\n\""+long+"\",\n2\n]", nil)
-	if bl := doc.Parts[0].Blocks; len(bl) != 3 || bl[0].Text != "1" || bl[1].Text != "\""+long+"\"" || bl[2].Text != "2" ||
+	if bl := doc.Parts[0].Blocks; len(bl) != 3 || bl[0].Text != "[\n1" || bl[1].Text != "\""+long+"\"" || bl[2].Text != "2" ||
 		bl[1].Loc.Anchor != "[1]" {
 		t.Errorf("long value: %d blocks", len(bl))
 	}
@@ -157,12 +157,15 @@ func TestDataBudget(t *testing.T) {
 	}
 	doc := dataDoc(t, "x.yaml", b.String(), &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 20000}})
 	w := csvWarnings(doc, gofastcore.WarnLimitExceeded)
-	// Two blocks of 1,000 lines fit in 20,000 bytes; the third does not.
-	if len(w) != 1 || w[0] != "the limit on the amount of text was reached; the body is cut off there (1000 lines not read)" {
-		t.Errorf("%q", w)
+	// The file is one value, a plain scalar of 3,000 lines: the budget
+	// cuts its block at a line end.
+	bl := doc.Parts[0].Blocks
+	if len(bl) != 1 || !strings.HasPrefix(b.String(), bl[0].Text+"\n") {
+		t.Fatalf("%d blocks", len(bl))
 	}
-	if len(doc.Parts[0].Blocks) != 2 {
-		t.Errorf("%d blocks", len(doc.Parts[0].Blocks))
+	read := strings.Count(bl[0].Text, "\n") + 1
+	if len(w) != 1 || w[0] != fmt.Sprintf("the limit on the amount of text was reached; the body is cut off there (%d lines not read)", 3000-read) {
+		t.Errorf("%q (%d lines read)", w, read)
 	}
 }
 
@@ -271,12 +274,13 @@ func TestDataReview(t *testing.T) {
 		}
 	}
 	// A lone CR ends a line.
-	check("a.yaml", "a: 1\rb: 2\r---\rc: 3\r", "a: 1\nb: 2", "---\nc: 3")
-	// Document markers: tab after ---; after ..., the next line starts a
-	// document, its directives first.
+	check("a.yaml", "a: 1\rb: 2\r---\rc: 3\r", "a: 1\nb: 2", "c: 3")
+	// Document markers and directives are not in the blocks: tab after
+	// ---; after ..., the next document, its directives first.
+	// (A mapping on the "---" line is not YAML: the file is read as lines.)
 	check("b.yaml", "a: 1\n---\tb: 2\n", "a: 1", "---\tb: 2")
-	check("c.yaml", "a: 1\n...\nb: 2\n", "a: 1\n...", "b: 2")
-	check("d.yaml", "a: 1\n...\n%YAML 1.2\n---\nb: 2\n", "a: 1\n...", "%YAML 1.2", "---\nb: 2")
+	check("c.yaml", "a: 1\n...\nb: 2\n", "a: 1", "b: 2")
+	check("d.yaml", "a: 1\n...\n%YAML 1.2\n---\nb: 2\n", "a: 1", "b: 2")
 	// Lines of control characters only are blank.
 	check("e.json", "\x01\na: 1\n\x01", "a: 1")
 	doc := dataDoc(t, "f.json", "\x01\n\x00\n", nil)
@@ -320,17 +324,16 @@ func TestDataReview(t *testing.T) {
 	b.WriteString("\n---\nb: 2\n")
 	doc = dataDoc(t, "j.yaml", b.String(), nil)
 	last := doc.Parts[0].Blocks[len(doc.Parts[0].Blocks)-1]
-	if last.Text != "---\nb: 2" || last.Continued {
+	if last.Text != "b: 2" || last.Continued || last.Attrs[AttrDocument] != "2" {
 		t.Errorf("document after a split: %q continued %v", last.Text, last.Continued)
 	}
 
 	// Lines not read: every line after the last block made.
 	for src, want := range map[string]string{
 		"a: 1\n---\nb: 2\n\n\n\n\n": "(6 lines not read)",
-		// The blank lines that end a document made are its own.
-		"a: 1\n\n\n\n---\nb: 2\n": "(2 lines not read)",
+		"a: 1\n\n\n\n---\nb: 2\n":   "(5 lines not read)",
 	} {
-		doc := dataDoc(t, "k.yaml", src, &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: 140}})
+		doc := dataDoc(t, "k.yaml", src, &gofastcore.Options{Limits: gofastcore.Limits{MaxTextBytes: gofastcore.BlockCost + 10}})
 		if w := csvWarnings(doc, gofastcore.WarnLimitExceeded); len(w) != 1 || !strings.HasSuffix(w[0], want) {
 			t.Errorf("%q: %q", src, w)
 		}

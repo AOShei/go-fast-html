@@ -1,6 +1,7 @@
 package gofasthtml
 
 import (
+	"bytes"
 	"context"
 	"strconv"
 	"strings"
@@ -30,6 +31,11 @@ const (
 	// AttrPathEnd is the path of a block's last member when it holds
 	// several: Loc.Anchor is the first's.
 	AttrPathEnd = "path_end"
+	// ExtraJSONSyntaxError and ExtraYAMLSyntaxError, in Metadata.Extra,
+	// say where and why a JSON or YAML file is not JSON or YAML; it is
+	// then read as lines.
+	ExtraJSONSyntaxError = "json.syntax_error"
+	ExtraYAMLSyntaxError = "yaml.syntax_error"
 )
 
 // The events a reader of JSON or YAML gives the splitter.
@@ -132,7 +138,15 @@ type dSplitter struct {
 	lastEnd      int // the end of the last block made
 	spent        bool
 	controls     int
-	events       int
+	// doc is the number of the YAML document being read, in a file of
+	// several; empty otherwise.
+	doc string
+	// scanned is where trailing has looked for comments up to.
+	scanned int
+	// head is where the text of the outermost container split since the
+	// last block begins (its key, the comments above it): the next block
+	// begins there, so that no line of the file is left out. -1 if none.
+	head int
 }
 
 func (s *dSplitter) top() *dFrame {
@@ -285,6 +299,9 @@ func (s *dSplitter) becomeSplit(f, p *dFrame) {
 		s.flushGroup(p)
 	}
 	f.split, f.flat = true, false
+	if s.head < 0 && !f.virtual {
+		s.head = max(s.extendStart(f.unit.start), s.lastEnd)
+	}
 	kids := f.kids
 	f.kids = nil
 	for _, u := range kids {
@@ -349,23 +366,54 @@ func (s *dSplitter) flushGroup(p *dFrame) {
 // emit makes a block of the text from first's start to last's end,
 // members of p (nil for a top-level value, whose path is empty).
 func (s *dSplitter) emit(p *dFrame, first, last dUnit) {
+	// After a cut by the text budget nothing more is made.
 	if s.spent {
 		return
 	}
 	start, end := s.extendStart(first.start), s.extendEnd(last.end)
-	start = max(start, s.lastEnd)
+	start = s.headed(max(start, s.lastEnd))
 	if start >= end {
 		return
 	}
 	text := s.clean(s.src[start:end])
-	if !s.text.Take(gofastcore.BlockCost + len(text)) {
-		s.spent = true
+	if strings.TrimSpace(text) == "" {
+		s.lastEnd = end // nothing but control characters and white space
 		return
+	}
+	if left := s.text.Left(); int64(gofastcore.BlockCost+len(text)) > left {
+		// The text budget ends inside the block: it is cut there, at a
+		// line end when there is one, and nothing more is read.
+		room := int(left) - gofastcore.BlockCost
+		s.spent = true
+		if room <= 0 {
+			s.text.Exhaust()
+			return
+		}
+		raw := s.src[start:end]
+		cut := room
+		for cut > 0 && raw[cut]&0xC0 == 0x80 {
+			cut--
+		}
+		if nl := bytes.LastIndexByte(raw[:cut], '\n'); nl > 0 {
+			cut = nl
+		}
+		end = start + cut
+		text = strings.TrimRight(s.clean(raw[:cut]), "\r")
+		s.text.Take(gofastcore.BlockCost + len(text))
+		s.text.Exhaust()
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+	} else {
+		s.text.Take(gofastcore.BlockCost + len(text))
 	}
 	off := s.m.Source(start)
 	b := gofastcore.Block{Kind: gofastcore.KindCode, Text: text,
 		Attrs: map[string]string{gofastcore.AttrLanguage: s.format},
 		Loc:   gofastcore.Location{Offset: off, Length: s.m.Source(end) - off}}
+	if s.doc != "" {
+		b.Attrs[AttrDocument] = s.doc
+	}
 	if p != nil {
 		b.Loc.Anchor = s.path(p, first)
 		if first.start != last.start || first.index != last.index {
@@ -374,6 +422,16 @@ func (s *dSplitter) emit(p *dFrame, first, last dUnit) {
 	}
 	s.part.Blocks = append(s.part.Blocks, b)
 	s.lastEnd = end
+}
+
+// headed returns where a block that would begin at start begins: at
+// the head of the containers split before it, if any.
+func (s *dSplitter) headed(start int) int {
+	if s.head >= 0 {
+		start = min(start, s.head)
+		s.head = -1
+	}
+	return start
 }
 
 // addRow adds the record u to p's run, making a table of the run's rows
@@ -435,8 +493,7 @@ func (s *dSplitter) table(p *dFrame) {
 	}
 	t.Rows = append(t.Rows, header)
 	t.RowLocs = append(t.RowLocs, gofastcore.Location{})
-	start := s.extendStart(r.rows[0].start)
-	start = max(start, s.lastEnd)
+	start := s.headed(max(s.extendStart(r.rows[0].start), s.lastEnd))
 	end := r.rows[len(r.rows)-1].end
 	for _, u := range r.rows {
 		row := make([]string, width)
@@ -463,6 +520,9 @@ func (s *dSplitter) table(p *dFrame) {
 		if len(t.Rows) > 2 {
 			b.Attrs[AttrPathEnd] = s.path(p, r.rows[len(t.Rows)-2])
 		}
+		if s.doc != "" {
+			b.Attrs[AttrDocument] = s.doc
+		}
 		s.part.Blocks = append(s.part.Blocks, b)
 		s.lastEnd = end
 	}
@@ -480,6 +540,12 @@ func (s *dSplitter) trailing(end int) {
 	if pos > 0 && pos < end && s.src[pos-1] != '\n' && s.src[pos-1] != '\r' {
 		_, pos = lineAt(s.src, pos)
 	}
+	// What was looked at before, with no block made since, is not looked
+	// at again.
+	if s.scanned > pos {
+		pos = s.scanned
+	}
+	s.scanned = max(s.scanned, end)
 	first, last := -1, -1
 	for pos < end {
 		ls, next := lineAt(s.src, pos)
@@ -497,6 +563,16 @@ func (s *dSplitter) trailing(end int) {
 	if first >= 0 {
 		s.emit(nil, dUnit{start: first, end: last}, dUnit{start: first, end: last})
 	}
+}
+
+// notRead returns where the text not made into blocks begins: after the
+// last block, at the next line when the last block ended at a line end.
+func (s *dSplitter) notRead() int {
+	from := s.lastEnd
+	if from < len(s.src) && (s.src[from] == '\n' || s.src[from] == '\r') {
+		_, from = lineAt(s.src, from)
+	}
+	return from
 }
 
 // lineAt returns the end of the line at pos (before its line end) and the
@@ -543,7 +619,7 @@ func (s *dSplitter) extendStart(pos int) int {
 	}
 	for i := ls; i < pos; i++ {
 		c := s.src[i]
-		if c == ' ' || c == '\t' || s.format == "yaml" && c == '-' {
+		if c == ' ' || c == '\t' || s.format == "yaml" && c == '-' && i+1 < len(s.src) && (s.src[i+1] == ' ' || s.src[i+1] == '\t') {
 			continue
 		}
 		return pos
@@ -593,23 +669,24 @@ func (s *dSplitter) extendEnd(pos int) int {
 	return pos
 }
 
-// clean returns the text of a block: line ends made "\n", control
-// characters other than tab dropped (counted).
-func (s *dSplitter) clean(b []byte) string {
+// clean returns the text of a block, as cleanCode.
+func (s *dSplitter) clean(b []byte) string { return cleanCode(b, &s.controls) }
+
+// cleanCode returns text as a code block holds it: line ends made "\n",
+// control characters other than tab dropped (counted in *controls), line
+// ends at its end left out.
+func cleanCode(b []byte, controls *int) string {
 	var out []byte
 	for pos := 0; pos < len(b); {
 		end, next := lineAt(b, pos)
 		if pos > 0 {
 			out = append(out, '\n')
 		}
-		out = dropControls(out, b[pos:end], &s.controls)
+		out = dropControls(out, b[pos:end], controls)
 		if out == nil {
 			out = []byte{}
 		}
 		pos = next
-	}
-	if len(b) > 0 && (b[len(b)-1] == '\n' || b[len(b)-1] == '\r') {
-		out = append(out, '\n')
 	}
 	return strings.TrimRight(string(out), "\n")
 }

@@ -2,8 +2,10 @@ package gofasthtml
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/charset"
@@ -80,35 +82,36 @@ func planJSON(ctx context.Context, src []byte, lines bool) (jsonPlan, error) {
 }
 
 // jsonStructure reads decoded JSON into part by its structure. It
-// returns false, having made nothing, when the text is not JSON: one
-// value with a syntax error, or no value; the caller reads it as lines.
+// returns no splitter, having made nothing, when the text is not JSON:
+// one value with a syntax error (returned), or no value; the caller reads
+// it as lines.
 // A file named as JSON Lines, or holding several values, is a sequence
 // of values whose lines that are not JSON are blocks as written.
 func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Map, name string,
-	part *gofastcore.Part, text *gofastcore.TextBudget) (*dSplitter, bool, error) {
+	part *gofastcore.Part, text *gofastcore.TextBudget) (*dSplitter, *jsonscan.Error, error) {
 	lines := jsonLinesName(name)
 	pl, err := planJSON(ctx, src, lines)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
 	if !lines {
 		if pl.err != nil {
 			// Several values one after another: JSON Lines in a .json.
 			if pl.values < 2 {
-				return nil, false, nil
+				return nil, pl.err, nil
 			}
 			lines = true
 			if pl, err = planJSON(ctx, src, true); err != nil {
-				return nil, false, err
+				return nil, nil, err
 			}
 		} else if pl.values > 1 {
 			lines = true
 		}
 	}
 	if pl.values == 0 && (!lines || len(pl.regions) == 0) {
-		return nil, false, nil
+		return nil, pl.err, nil
 	}
-	s := &dSplitter{ctx: ctx, src: src, m: m, format: "json", limit: dataUnitBytes, text: text, part: part,
+	s := &dSplitter{ctx: ctx, src: src, m: m, format: "json", limit: dataUnitBytes, text: text, part: part, head: -1,
 		comment: jsonComment}
 	s.keyText = func(k keyRef) string {
 		if k.set {
@@ -145,7 +148,7 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 	for n := 0; ; n++ {
 		if n&4095 == 0 {
 			if err := ctx.Err(); err != nil {
-				return nil, false, err
+				return nil, nil, err
 			}
 		}
 		tok, ok, err := sc.Next()
@@ -199,7 +202,7 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 		s.closeVirtual(len(src))
 	}
 	s.event(dEvent{kind: evDocEnd, end: len(src)})
-	return s, true, nil
+	return s, nil, nil
 }
 
 // jsonComment reports whether a line is only a comment (JSON with
@@ -207,4 +210,18 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 func jsonComment(line []byte) bool {
 	t := strings.TrimLeft(string(line), " \t")
 	return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*")
+}
+
+// syntaxPlace writes where an offset of src is: "line L, column C", the
+// column in characters from 1.
+func syntaxPlace(src []byte, off int) string {
+	off = min(off, len(src))
+	line, ls := 1, 0
+	for i := 0; i < off; i++ {
+		if src[i] == '\n' || src[i] == '\r' && (i+1 >= len(src) || src[i+1] != '\n') {
+			line++
+			ls = i + 1
+		}
+	}
+	return fmt.Sprintf("line %d, column %d", line, utf8.RuneCount(src[ls:off])+1)
 }

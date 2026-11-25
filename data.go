@@ -36,6 +36,11 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}
 	enc := charset.SniffText(src, e.Charset)
+	if format == "json" && enc.Unknown {
+		// JSON is UTF-8 (RFC 8259, 8.1): text whose encoding is not
+		// certain is read as UTF-8, its invalid bytes U+FFFD.
+		enc = charset.Result{Enc: charset.UTF8, From: charset.FromDetected}
+	}
 	if err := t.sniffed(&enc, false); err != nil {
 		return nil, err
 	}
@@ -51,28 +56,53 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 				int64(len(src))-m.Source(len(decoded))))
 	}
 
-	// JSON is cut by its structure; text that is not JSON is read as lines.
-	if format == "json" {
-		s, ok, err := e.jsonStructure(ctx, decoded, m, opts.Name, &part, text)
+	// JSON and YAML are cut by their structure; text that is neither is
+	// read as lines.
+	var (
+		s      *dSplitter
+		synErr string
+	)
+	switch format {
+	case "json":
+		sp, se, err := e.jsonStructure(ctx, decoded, m, opts.Name, &part, text)
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			if s.spent {
-				part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-					textCutMessage(part.Kind)+" ("+count(dataLinesFrom(decoded, s.lastEnd), "line", "lines")+" not read)")
-			}
-			if s.controls > 0 {
-				part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(s.controls, "the text"))
-			}
-			if len(part.Blocks) == 0 && !cut && !s.spent {
-				part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")
-			}
-			part.Finish()
-			doc.Parts = append(doc.Parts, part)
-			t.finish(doc)
-			return doc, nil
+		s = sp
+		if se != nil {
+			synErr = syntaxPlace(decoded, se.Offset) + ": " + se.Msg
 		}
+	case "yaml":
+		sp, se, err := e.yamlStructure(ctx, decoded, m, &part, text)
+		if err != nil {
+			return nil, err
+		}
+		s = sp
+		if se != nil {
+			synErr = syntaxPlace(decoded, se.Offset) + ": " + se.Msg
+		}
+	}
+	if synErr != "" {
+		if doc.Metadata.Extra == nil {
+			doc.Metadata.Extra = map[string]string{}
+		}
+		doc.Metadata.Extra[format+".syntax_error"] = synErr
+	}
+	if s != nil {
+		if s.spent {
+			part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+				textCutMessage(part.Kind)+" ("+count(dataLinesFrom(decoded, s.notRead()), "line", "lines")+" not read)")
+		}
+		if s.controls > 0 {
+			part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(s.controls, "the text"))
+		}
+		if len(part.Blocks) == 0 && !cut && !s.spent {
+			part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")
+		}
+		part.Finish()
+		doc.Parts = append(doc.Parts, part)
+		t.finish(doc)
+		return doc, nil
 	}
 
 	var (
