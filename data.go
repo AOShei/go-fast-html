@@ -3,10 +3,13 @@ package gofasthtml
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/charset"
+	"github.com/AOShei/go-fast-html/internal/jsonscan"
+	"github.com/AOShei/go-fast-html/internal/yaml"
 )
 
 // A JSON or YAML document longer than this is split at line ends into
@@ -25,17 +28,23 @@ type dataLine struct {
 	controls   int    // control characters dropped
 }
 
-// dataText reads a JSON or YAML file into one part of kind body: its text,
-// verbatim but for control characters, in code blocks whose language is
-// the format. Nothing is parsed. A YAML file of several documents has a
-// block (or a run of pieces) for each; the blank lines at the start and
-// end of a document are left out, and the pieces of a document joined
-// with line feeds give it back.
+// dataText reads a JSON or YAML file into one part of kind body: by its
+// structure (jsonStructure, yamlStructure), or, when it is neither, as
+// lines: its text, verbatim but for control characters, in code blocks
+// whose language is the format. Read as lines, a YAML file of several
+// documents has a block (or a run of pieces) for each; the blank lines at
+// the start and end of a document are left out, and the pieces of a
+// document joined with line feeds give it back.
 func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src []byte, format string, opts *gofastcore.Options,
 	text *gofastcore.TextBudget, decode *gofastcore.DecodeBudget) (*gofastcore.Document, error) {
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}
 	enc := charset.SniffText(src, e.Charset)
+	if format == "json" && enc.Unknown {
+		// JSON is UTF-8 (RFC 8259, 8.1): text whose encoding is not
+		// certain is read as UTF-8, its invalid bytes U+FFFD.
+		enc = charset.Result{Enc: charset.UTF8, From: charset.FromDetected}
+	}
 	if err := t.sniffed(&enc, false); err != nil {
 		return nil, err
 	}
@@ -49,6 +58,72 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			fmt.Sprintf("the limit on decoded bytes was reached; the rest of the input was not read (%d bytes)",
 				int64(len(src))-m.Source(len(decoded))))
+	}
+
+	// JSON and YAML are cut by their structure; text that is neither is
+	// read as lines.
+	var (
+		s      *dSplitter
+		synErr string
+		deep   bool // nested deeper than the bound: read as lines
+	)
+	switch format {
+	case "json":
+		sp, se, err := e.jsonStructure(ctx, decoded, m, opts.Name, &part, text)
+		if err != nil {
+			return nil, err
+		}
+		s = sp
+		switch {
+		case se == nil:
+		case se.Msg == jsonscan.ErrDepth:
+			deep = true
+		default:
+			synErr = syntaxPlace(decoded, se.Offset) + ": " + se.Msg
+		}
+	case "yaml":
+		sp, se, err := e.yamlStructure(ctx, decoded, m, &part, text)
+		if err != nil {
+			return nil, err
+		}
+		s = sp
+		switch {
+		case se == nil:
+		case errors.Is(se, yaml.ErrDepth):
+			deep = true
+		default:
+			synErr = syntaxPlace(decoded, se.Offset) + ": " + se.Msg
+		}
+	}
+	if deep {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the nesting is deeper than %d; the file was read as lines", jsonscan.DefaultMaxDepth))
+	}
+	// Text cut by the decode budget was not read to its end: that it does
+	// not end as JSON or YAML says nothing about the file.
+	if synErr != "" && !cut {
+		if doc.Metadata.Extra == nil {
+			doc.Metadata.Extra = map[string]string{}
+		}
+		msg, n := cleanMeta(synErr) // the message may quote the input
+		t.controls += n
+		doc.Metadata.Extra[format+".syntax_error"] = msg
+	}
+	if s != nil {
+		if s.spent {
+			part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+				textCutMessage(part.Kind)+" ("+count(dataLinesFrom(decoded, s.notRead()), "line", "lines")+" not read)")
+		}
+		if s.controls > 0 {
+			part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(s.controls, "the text"))
+		}
+		if len(part.Blocks) == 0 && !cut && !s.spent {
+			part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")
+		}
+		part.Finish()
+		doc.Parts = append(doc.Parts, part)
+		t.finish(doc)
+		return doc, nil
 	}
 
 	var (

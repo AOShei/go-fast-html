@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("+++\ntitle = \"T\"\n[p]\na\x12= [1, '2']\n+++\nx")

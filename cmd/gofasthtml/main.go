@@ -50,11 +50,11 @@ func main() {
 // The extensions of the files this command picks out of a directory.
 var extensions = map[string]bool{
 	".html": true, ".htm": true, ".xhtml": true, ".shtml": true,
-	".md": true, ".markdown": true, ".mdown": true, ".mkd": true, ".mkdn": true, ".mdwn": true,
+	".md": true, ".markdown": true, ".mdown": true, ".mkd": true, ".mkdn": true, ".mdwn": true, ".mdc": true, ".qmd": true, ".rmd": true,
 	".txt": true, ".text": true,
 	".epub": true,
 	".csv":  true, ".tsv": true, ".tab": true, ".ipynb": true,
-	".json": true, ".jsonl": true, ".ndjson": true, ".geojson": true, ".yaml": true, ".yml": true,
+	".json": true, ".jsonl": true, ".ndjson": true, ".jsonlines": true, ".geojson": true, ".jsonc": true, ".yaml": true, ".yml": true,
 	".mht": true, ".mhtml": true,
 	".srt": true, ".vtt": true, ".webvtt": true,
 }

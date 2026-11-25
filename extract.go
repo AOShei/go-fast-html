@@ -94,7 +94,7 @@ const (
 )
 
 // Extractor extracts HTML, Markdown, plain text, EPUB, comma- and
-// tab-separated values, Jupyter notebooks, JSON and YAML as text, and web
+// tab-separated values, Jupyter notebooks, JSON and YAML, and web
 // pages saved as one file (MHTML). The
 // zero value is ready to use and safe for concurrent use.
 type Extractor struct {
@@ -154,10 +154,11 @@ func (e *Extractor) Formats() []string {
 
 // Detect decides the format of an input from its name, and failing that
 // from its content: a name ending in .html, .htm, .xhtml or .shtml is
-// HTML; .md, .markdown, .mdown, .mkd, .mkdn or .mdwn Markdown; .txt or
+// HTML; .md, .markdown, .mdown, .mkd, .mkdn, .mdwn, .mdc (Cursor's
+// rules), .qmd (Quarto) or .rmd (R Markdown) Markdown; .txt or
 // .text plain text; .epub EPUB; .csv comma-separated values; .tsv or
 // .tab tab-separated values; .ipynb a Jupyter notebook; .json, .jsonl,
-// .ndjson or .geojson JSON; .yaml or .yml YAML; .mht or .mhtml a web
+// .ndjson, .jsonlines, .geojson or .jsonc JSON; .yaml or .yml YAML; .mht or .mhtml a web
 // page saved as one file (MHTML); .srt SubRip; .vtt or .webvtt WebVTT. A
 // file whose header is that of an MHTML file a browser saved (a
 // Snapshot-Content-Location field, or From "<Saved by ...>", with a
@@ -180,7 +181,7 @@ func Detect(name string, src []byte) string {
 		return "tsv"
 	case ".html", ".htm", ".xhtml", ".shtml":
 		return "html"
-	case ".md", ".markdown", ".mdown", ".mkd", ".mkdn", ".mdwn":
+	case ".md", ".markdown", ".mdown", ".mkd", ".mkdn", ".mdwn", ".mdc", ".qmd", ".rmd":
 		return "md"
 	case ".txt", ".text":
 		return "txt"
@@ -188,7 +189,7 @@ func Detect(name string, src []byte) string {
 		return "epub"
 	case ".ipynb":
 		return "ipynb"
-	case ".json", ".jsonl", ".ndjson", ".geojson":
+	case ".json", ".jsonl", ".ndjson", ".jsonlines", ".geojson", ".jsonc":
 		return "json"
 	case ".yaml", ".yml":
 		return "yaml"
@@ -380,12 +381,32 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	}
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}
-	res, err := e.page(ctx, src, format, pageConfig{opts: opts, text: text, decode: decode, charset: e.Charset}, &part, t)
+	var fm frontMatter
+	res, err := e.page(ctx, src, format, pageConfig{opts: opts, text: text, decode: decode, charset: e.Charset, frontMatter: &fm}, &part, t)
 	if err != nil {
 		return nil, err
 	}
 	if res != nil {
 		doc.Metadata = res.Meta
+	}
+	if fm.lang != "" {
+		cut, listLeft := applyFrontMatter(&doc.Metadata, fm, &t.controls)
+		if cut > 0 {
+			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+				fmt.Sprintf("%s of the front matter cut or left out in the metadata (whole in its block): values cut at %d bytes, values whose key path is longer than %d bytes left out", count(cut, "value", "values"), MaxMetaValue, maxFrontMatterKey))
+		}
+		if listLeft > 0 {
+			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+				fmt.Sprintf("%s of the front matter left out of the metadata past %d (whole in its block)", count(listLeft, "author or keyword", "authors and keywords"), blocks.MaxMetaList))
+		}
+		if fm.notYAML != "" {
+			doc.Warn(gofastcore.SeverityInfo, gofastcore.WarnInputRepaired,
+				"the front matter is not YAML ("+fm.notYAML+"); its values were read line by line as key: value")
+		}
+		if fm.valuesCut {
+			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+				fmt.Sprintf("the front matter has more than %d values; those past it are in its block only, not in the metadata", maxFrontMatterKeys))
+		}
 	}
 	doc.Parts = append(doc.Parts, part)
 	if len(t.stored) > 0 && opts.Parts == (gofastcore.PartRange{}) {
@@ -542,6 +563,9 @@ type pageConfig struct {
 	chapter bool
 	// notebook: the pages are the cells of a notebook.
 	notebook bool
+	// frontMatter, when set, receives the front matter of a Markdown
+	// text, whose block page puts first in the part.
+	frontMatter *frontMatter
 	// noDataElsewhere counts the images whose data image reported
 	// missing for a reason warned of elsewhere (a limit, encryption),
 	// which image.unsupported_encoding leaves out.
@@ -600,8 +624,24 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	}
 
 	page, source := decoded, m.Source
+	var fm frontMatter
 	if format == "md" {
-		d, err := md.Parse(ctx, string(decoded))
+		mdText := decoded
+		if pc.frontMatter != nil {
+			var ok bool
+			if fm, ok = findFrontMatter(decoded); ok {
+				// The Markdown is read with the front matter's lines blank,
+				// so that offsets stay those of the text.
+				mdText = bytes.Clone(decoded)
+				for i := fm.start; i < fm.end; i++ {
+					if mdText[i] != '\n' && mdText[i] != '\r' {
+						mdText[i] = ' '
+					}
+				}
+				*pc.frontMatter = fm
+			}
+		}
+		d, err := md.Parse(ctx, string(mdText))
 		if err != nil {
 			return nil, err
 		}
@@ -617,11 +657,21 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		source = func(i int) int64 { return m.Source(h.Source(i)) }
 	}
 
+	var fmBlock []gofastcore.Block
+	if fm.lang != "" {
+		b := frontMatterBlock(decoded, fm, m.Source, &t.controls)
+		if strings.TrimSpace(b.Text) != "" && text.Take(gofastcore.BlockCost+len(b.Text)) {
+			fmBlock = append(fmBlock, b)
+		}
+	}
 	w, err := e.walk(ctx, page, source, pc)
 	if err != nil {
 		return nil, err
 	}
 	part.Blocks = w.res.Blocks
+	if len(fmBlock) > 0 {
+		part.Blocks = append(fmBlock, part.Blocks...)
+	}
 	e.report(part, w, cut, pc, t)
 	return w.res, nil
 }
