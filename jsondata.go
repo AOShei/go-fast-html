@@ -36,7 +36,11 @@ type jsonPlan struct {
 // planJSON reads src once without making anything: how many values, and
 // where the text is not JSON. With lines, an error ends at its line and
 // reading goes on at the next one.
-func planJSON(ctx context.Context, src []byte, lines bool) (jsonPlan, error) {
+//
+// With oneLine (a file named as JSON Lines) a value must be on one line:
+// a value whose error is past the end of the line it began on makes that
+// line the region not read as JSON, and reading goes on at the next.
+func planJSON(ctx context.Context, src []byte, lines, oneLine bool) (jsonPlan, error) {
 	var pl jsonPlan
 	sc := jsonscan.New(src)
 	valueStart := -1
@@ -60,6 +64,13 @@ func planJSON(ctx context.Context, src []byte, lines bool) (jsonPlan, error) {
 				at = min(at, valueStart)
 			}
 			end, next := lineAt(src, je.Offset)
+			if oneLine {
+				// In JSON Lines a value is on one line: when the error is
+				// past it, only that line is not JSON.
+				if le, ln := lineAt(src, at); je.Offset >= le {
+					end, next = le, ln
+				}
+			}
 			pl.regions = append(pl.regions, rawRegion{start: lineStart(src, at), end: end, next: next})
 			sc.Reset(next)
 			valueStart = -1
@@ -91,7 +102,7 @@ func planJSON(ctx context.Context, src []byte, lines bool) (jsonPlan, error) {
 func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Map, name string,
 	part *gofastcore.Part, text *gofastcore.TextBudget) (*dSplitter, *jsonscan.Error, error) {
 	lines := jsonLinesName(name)
-	pl, err := planJSON(ctx, src, lines)
+	pl, err := planJSON(ctx, src, lines, lines)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -102,7 +113,7 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 				return nil, pl.err, nil
 			}
 			lines = true
-			if pl, err = planJSON(ctx, src, true); err != nil {
+			if pl, err = planJSON(ctx, src, true, false); err != nil {
 				return nil, nil, err
 			}
 		} else if pl.values > 1 {
