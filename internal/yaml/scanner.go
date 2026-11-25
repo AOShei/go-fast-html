@@ -60,6 +60,12 @@ type simpleKey struct {
 // maxKeyLength is the spec's bound on an implicit key, in characters.
 const maxKeyLength = 1024
 
+// maxFlowKeyBytes bounds an implicit key directly inside a flow mapping,
+// which the spec lets span lines without a bound. The tokens after a
+// possible key are held until it is decided, so this bounds what the
+// scanner holds.
+const maxFlowKeyBytes = 64 << 10
+
 type scanner struct {
 	src             []byte
 	pos, line, col  int
@@ -243,8 +249,11 @@ func (s *scanner) next() {
 // ---- simple keys ----
 
 func (s *scanner) stale(k *simpleKey) bool {
-	if !k.possible || k.flowMap {
+	if !k.possible {
 		return false
+	}
+	if k.flowMap {
+		return s.pos-k.mark.pos > maxFlowKeyBytes
 	}
 	return k.mark.line < s.line || s.col-k.mark.col > maxKeyLength
 }
@@ -413,7 +422,9 @@ func (s *scanner) fetchNextToken() {
 			return
 		}
 	}
-	defer func() { s.spaced = false }()
+	// Nothing reads spaced while a token is scanned; after the token no
+	// white space precedes the position.
+	s.spaced = false
 	c := s.src[s.pos]
 	if s.col == 0 {
 		if c == '%' {
@@ -969,6 +980,10 @@ outer:
 	}
 	s.reset(end)
 	s.ws, s.lb, s.tb = ws, lb, tb
+	if end.pos == start.pos {
+		s.fail(start, "found character that cannot start any token")
+		return
+	}
 	var v string
 	if simple {
 		v = string(s.src[start.pos:end.pos])
