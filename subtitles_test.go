@@ -149,6 +149,30 @@ func TestSubtitleBlocks(t *testing.T) {
 			src:  "00:01.000 --> 00:02.000\nx\n",
 			want: []string{`paragraph "x" @0+25 {end=00:00:02.000 start=00:00:01.000}`},
 			warn: []string{"does not begin with the WebVTT signature"}},
+		{name: "srt CR CR LF is one line end", format: "srt",
+			src: "1\r\r\n00:00:01,000 --> 00:00:02,000\r\r\nA\r\r\nB\r\r\n\r\r\n2\r\r\n00:00:03,000 --> 00:00:04,000\r\r\nC\r\r\n",
+			want: []string{
+				`paragraph "A\nB" @0+41 #1 {end=00:00:02.000 start=00:00:01.000}`,
+				`paragraph "C" @47+37 #2 {end=00:00:04.000 start=00:00:03.000}`,
+			}},
+		{name: "srt byte order mark before a cue number", format: "srt",
+			src:  "\r\n" + string(rune(0xFEFF)) + "1\r\n00:00:01,000 --> 00:00:02,000\r\nA\r\n",
+			want: []string{`paragraph "A" @2+38 #1 {end=00:00:02.000 start=00:00:01.000}`}},
+		{name: "vtt CR CR LF is one line end", format: "vtt",
+			src: "WEBVTT\r\r\n\r\r\n00:01.000 --> 00:02.000\r\r\nA\r\r\nB\r\r\n\r\r\n00:03.000 --> 00:04.000\r\r\nC\r\r\n",
+			want: []string{
+				`paragraph "A\nB" @12+31 {end=00:00:02.000 start=00:00:01.000}`,
+				`paragraph "C" @49+27 {end=00:00:04.000 start=00:00:03.000}`,
+			}},
+		{name: "vtt line of spaces is a line of the cue", format: "vtt",
+			src:  "WEBVTT\n\n00:01.000 --> 00:02.000\nA\n \t \nB\n",
+			want: []string{`paragraph "A\n\nB" @8+31 {end=00:00:02.000 start=00:00:01.000}`}},
+		{name: "vtt unclosed < and ones before a >", format: "vtt",
+			src:  "WEBVTT\n\n00:01.000 --> 00:02.000\na<<b>c < d <\n",
+			want: []string{`paragraph "ac < d <" @8+36 {end=00:00:02.000 start=00:00:01.000}`}},
+		{name: "srt unclosed override and font", format: "srt", spans: true,
+			src:  "1\n00:00:01,000 --> 00:00:02,000\n{\\an8}a {\\b <i>b</i> <font x\n",
+			want: []string{`paragraph "a {\\b b <font x" @0+60 #1 {end=00:00:02.000 start=00:00:01.000} [6,7)italic`}},
 		{name: "vtt header line with an arrow begins a cue", format: "vtt",
 			src:  "WEBVTT\nKind: captions\n00:01.000 --> 00:02.000\nx\n",
 			want: []string{`paragraph "x" @22+25 {end=00:00:02.000 start=00:00:01.000}`}},
@@ -325,6 +349,55 @@ func TestSubtitleBudget(t *testing.T) {
 	if !doc.Parts[0].Has(gofastcore.WarnLimitExceeded) || len(doc.Parts[0].Blocks) == 0 {
 		t.Errorf("decode: %d blocks, %s", len(doc.Parts[0].Blocks), warnCodes(doc))
 	}
+}
+
+// TestVTTBounds checks that the bounds which keep WebVTT reading linear
+// still cut, and say so: tag nesting, header text, a repeated header key,
+// the voices of a cue.
+func TestVTTBounds(t *testing.T) {
+	t.Run("nesting", func(t *testing.T) {
+		src := "WEBVTT\n\n00:01.000 --> 00:02.000\n<b><i><u>x</u>y</i>z</b>\n"
+		doc, err := (&Extractor{Format: "vtt", MaxDepth: 2}).Extract(context.Background(), strings.NewReader(src), int64(len(src)), &gofastcore.Options{Spans: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := strings.Join(briefs(doc.Parts[0]), "\n")
+		if want := `paragraph "xyz" @8+48 {end=00:00:02.000 start=00:00:01.000} [0,2)italic [0,3)bold`; got != want {
+			t.Errorf("got  %s\nwant %s", got, want)
+		}
+		if ws := warnCodes(doc); !strings.Contains(ws, "limit.exceeded(error): 1 cue has tags nested more than 2 deep") {
+			t.Errorf("warnings:\n%s", ws)
+		}
+	})
+	limited := func(t *testing.T, doc *gofastcore.Document, what string, n, bound int) {
+		t.Helper()
+		if n > bound || n < bound-8 {
+			t.Errorf("%s: %d bytes, bound %d", what, n, bound)
+		}
+		if !strings.Contains(warnCodes(doc), "limit.exceeded(error)") {
+			t.Errorf("%s: no limit.exceeded:\n%s", what, warnCodes(doc))
+		}
+	}
+	t.Run("header text", func(t *testing.T) {
+		doc := subExtract(t, "vtt", "WEBVTT\n"+strings.Repeat("xxxxxxxx\n", 20000)+"\n00:01.000 --> 00:02.000\nx\n", nil)
+		limited(t, doc, "vtt.header", len(doc.Metadata.Extra["vtt.header"]), 64<<10)
+	})
+	t.Run("repeated key", func(t *testing.T) {
+		doc := subExtract(t, "vtt", "WEBVTT\n"+strings.Repeat("a: bcdefgh\n", 20000)+"\n00:01.000 --> 00:02.000\nx\n", nil)
+		limited(t, doc, "vtt.a", len(doc.Metadata.Extra["vtt.a"]), 64<<10)
+	})
+	t.Run("voices", func(t *testing.T) {
+		var sb strings.Builder
+		for i := range 3000 {
+			fmt.Fprintf(&sb, "<v %d>", i)
+		}
+		doc := subExtract(t, "vtt", "WEBVTT\n\n00:01.000 --> 00:02.000\n"+sb.String()+"x\n", nil)
+		v := doc.Parts[0].Blocks[0].Attrs["voice"]
+		limited(t, doc, "voice", len(v), maxSubtitleAttr)
+		if !strings.HasPrefix(v, "0, 1, 2, ") {
+			t.Errorf("voice %.40q", v)
+		}
+	})
 }
 
 func TestSubtitleCueBound(t *testing.T) {

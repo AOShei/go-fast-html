@@ -10,12 +10,23 @@ import (
 	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
+	"github.com/AOShei/go-fast-html/internal/blocks"
 	"github.com/AOShei/go-fast-html/internal/entity"
 )
 
 // MaxText bounds the text of one cue or block: past it the text is cut,
 // and the item says so (Cut).
 const MaxText = 8 << 20
+
+// MaxHeader bounds the text of the WebVTT header: past it the rest is left
+// out, the text kept longer than the bound so that its user, which cuts
+// it there, sees that it was. It is the bound of a metadata value.
+const MaxHeader = blocks.MaxMeta
+
+// MaxVoices bounds the voices of a cue, joined by ", ": once they are
+// longer, the cue's later voices are not collected (its user cuts the
+// joined list at this bound).
+const MaxVoices = 4 << 10
 
 // Kind says what an item is.
 type Kind uint8
@@ -59,6 +70,9 @@ type Item struct {
 	Controls int
 	// Cut says that the text was longer than MaxText and was cut there.
 	Cut bool
+	// Deep says that WebVTT tags nested deeper than the bound given VTT;
+	// the deeper tags were ignored.
+	Deep bool
 }
 
 // Field is a WebVTT header line of the form "Key: value".
@@ -69,7 +83,8 @@ type Header struct {
 	// Signature says that the file begins with the WebVTT signature.
 	Signature bool
 	// Text is what follows WEBVTT on the first line, trimmed, and the
-	// header lines that are not "Key: value", one per line.
+	// header lines that are not "Key: value", one per line; once longer
+	// than MaxHeader, the later lines are left out.
 	Text string
 	// Fields are the header lines "Key: value", in order.
 	Fields []Field
@@ -88,6 +103,10 @@ type line struct {
 }
 
 func (l *line) blank() bool { return len(bytes.TrimSpace(l.text)) == 0 }
+
+// empty reports whether the line is the empty string: in WebVTT only such
+// a line ends a block or the header, not a line of white space.
+func (l *line) empty() bool { return len(l.raw) == 0 }
 
 func (l *line) timing() bool { return bytes.Contains(l.text, []byte("-->")) }
 
@@ -124,9 +143,15 @@ func (r *reader) next() (line, bool) {
 	}
 	r.pos = e
 	if e < len(r.src) {
+		// A line ends at "\n", "\r", "\r\n" or "\r\r\n": the last is
+		// written by files converted twice from Windows line ends.
 		r.pos++
-		if r.src[e] == '\r' && r.pos < len(r.src) && r.src[r.pos] == '\n' {
-			r.pos++
+		if r.src[e] == '\r' {
+			if r.pos < len(r.src) && r.src[r.pos] == '\n' {
+				r.pos++
+			} else if r.pos+1 < len(r.src) && r.src[r.pos] == '\r' && r.src[r.pos+1] == '\n' {
+				r.pos += 2
+			}
 		}
 	}
 	l := line{raw: r.src[s:e], start: s, end: e}
@@ -222,7 +247,7 @@ func SRT(ctx context.Context, src []byte, yield func(*Item) bool) error {
 			cur = &Item{Kind: Cue, Start: l.start, End: l.end}
 			if num != nil {
 				cur.Start = num.start
-				cur.ID = string(bytes.TrimSpace(num.text))
+				cur.ID = string(trimNumber(num.text))
 			}
 			cur.Begin, cur.Finish, cur.Settings, cur.TimingOK = timing(l.text)
 			continue
@@ -260,10 +285,16 @@ func SRT(ctx context.Context, src []byte, yield func(*Item) bool) error {
 	return nil
 }
 
+// trimNumber trims white space and U+FEFF around a number line: files
+// joined from others carry a byte order mark before a cue number.
+func trimNumber(b []byte) []byte {
+	return bytes.TrimFunc(b, func(r rune) bool { return r == 0xFEFF || unicode.IsSpace(r) })
+}
+
 // isNumber reports whether a line is a cue number: digits, with white
-// space around them.
+// space or U+FEFF around them.
 func isNumber(b []byte) bool {
-	b = bytes.TrimSpace(b)
+	b = trimNumber(b)
 	if len(b) == 0 {
 		return false
 	}
@@ -279,18 +310,22 @@ func isNumber(b []byte) bool {
 // NOTE and STYLE block, and block that is none of these, and returning
 // the header and the REGION definitions. It stops when yield returns
 // false, and returns the context's error when it is cancelled.
-func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error) {
+func VTT(ctx context.Context, src []byte, maxDepth int, yield func(*Item) bool) (Header, error) {
 	r := &reader{ctx: ctx, src: src}
 	var h Header
 	if l, ok := r.next(); ok {
 		if rest, ok := signature(l.raw); ok {
 			h.Signature = true
-			h.Text = string(bytes.TrimSpace(dropControls(rest, &h.Controls)))
-			// The header: lines up to the first blank one, or to one
+			text := bytes.TrimSpace(dropControls(rest, &h.Controls))
+			if len(text) > MaxHeader {
+				text = text[:MaxHeader+1]
+			}
+			text = append([]byte(nil), text...)
+			// The header: lines up to the first empty one, or to one
 			// with an arrow, which begins a cue.
 			for {
 				l, ok := r.next()
-				if !ok || l.blank() {
+				if !ok || l.empty() {
 					break
 				}
 				if l.timing() {
@@ -300,13 +335,17 @@ func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error
 				h.Controls += l.controls
 				if k, v, ok := field(l.text); ok {
 					h.Fields = append(h.Fields, Field{k, v})
-				} else if t := bytes.TrimSpace(l.text); len(h.Text)+len(t) < MaxText {
-					if h.Text != "" {
-						h.Text += "\n"
+				} else if t := bytes.TrimSpace(l.text); len(t) > 0 && len(text) <= MaxHeader {
+					// Past MaxHeader the rest is left out: the text
+					// is longer than the bound, and is cut there
+					// when used.
+					if len(text) > 0 {
+						text = append(text, '\n')
 					}
-					h.Text += string(t)
+					text = append(text, t[:min(len(t), MaxHeader+1)]...)
 				}
 			}
+			h.Text = string(text)
 		} else {
 			r.unread(l)
 		}
@@ -337,13 +376,14 @@ func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error
 		}
 		body = body[:0]
 		lines, over := 0, false
-		// add appends the lines of the block to body, up to a blank line
-		// or, the spec's rule, a line with an arrow, which is put back
-		// to begin the next block.
+		// add appends the lines of the block to body, up to an empty
+		// line (a line of white space is a line of the block) or, the
+		// spec's rule, a line with an arrow, which is put back to begin
+		// the next block.
 		add := func() {
 			for {
 				n, ok := r.next()
-				if !ok || n.blank() {
+				if !ok || n.empty() {
 					ctrl += n.controls
 					return
 				}
@@ -369,7 +409,7 @@ func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error
 			it.Kind = Cue
 			it.Begin, it.Finish, it.Settings, it.TimingOK = timing(t.text)
 			add()
-			vttText(body, b, &it.Voices)
+			it.Deep = vttText(body, b, &it.Voices, maxDepth)
 		} else {
 			first := l.text
 			lines = 1
@@ -616,10 +656,11 @@ func srtText(s []byte, w *builder) {
 	var depth [3]int
 	var start [3]int
 	styles := [3]gofastcore.Style{gofastcore.StyleBold, gofastcore.StyleItalic, gofastcore.StyleUnderline}
+	var none unclosed
 	for i := 0; i < len(s) && !w.cut; {
 		c := s[i]
 		if c == '<' || c == '{' {
-			if k, end, n := srtTag(s[i:]); n > 0 {
+			if k, end, n := srtTag(s[i:], &none); n > 0 {
 				if k >= 0 {
 					if !end {
 						if depth[k] == 0 {
@@ -652,10 +693,14 @@ func srtText(s []byte, w *builder) {
 	}
 }
 
+// unclosed records what is no longer in the rest of a SubRip cue's text.
+type unclosed struct{ brace, gt bool }
+
 // srtTag reads the SubRip markup at the start of s: it returns the style
 // (0 bold, 1 italic, 2 underline, -1 none), whether it ends the style,
-// and its length, 0 when s does not begin with markup.
-func srtTag(s []byte) (k int, end bool, n int) {
+// and its length, 0 when s does not begin with markup. none records that
+// no "}" or ">" is left in the text, so that it is not looked for again.
+func srtTag(s []byte, none *unclosed) (k int, end bool, n int) {
 	style := func(c byte) int {
 		switch c | 0x20 {
 		case 'b':
@@ -671,8 +716,11 @@ func srtTag(s []byte) (k int, end bool, n int) {
 	if open == '{' {
 		close = '}'
 		if len(s) > 1 && s[1] == '\\' {
-			if j := bytes.IndexByte(s, '}'); j > 0 {
-				return -1, false, j + 1
+			if !none.brace {
+				if j := bytes.IndexByte(s, '}'); j > 0 {
+					return -1, false, j + 1
+				}
+				none.brace = true
 			}
 			return -1, false, 0
 		}
@@ -688,10 +736,11 @@ func srtTag(s []byte) (k int, end bool, n int) {
 		}
 	}
 	if open == '<' {
-		if len(s) > 5 && bytes.EqualFold(s[1:5], []byte("font")) && (s[5] == '>' || s[5] == ' ' || s[5] == '\t' || s[5] == '\n') {
+		if !none.gt && len(s) > 5 && bytes.EqualFold(s[1:5], []byte("font")) && (s[5] == '>' || s[5] == ' ' || s[5] == '\t' || s[5] == '\n') {
 			if j := bytes.IndexByte(s, '>'); j > 0 {
 				return -1, false, j + 1
 			}
+			none.gt = true
 		}
 		if len(s) >= 7 && bytes.EqualFold(s[:7], []byte("</font>")) {
 			return -1, true, 7
@@ -703,14 +752,19 @@ func srtTag(s []byte) (k int, end bool, n int) {
 // vttText appends WebVTT cue text, parsed as the WebVTT cue text parsing
 // rules have it: tags are markup (those of the spec give spans and voices,
 // others are ignored), character references are decoded. A "<" with no
-// ">" after it is text.
-func vttText(s []byte, w *builder, voices *[]string) {
+// ">" after it is text. Tags nest at most maxDepth deep: deeper ones, and
+// as many end tags, are ignored, and it returns true.
+func vttText(s []byte, w *builder, voices *[]string, maxDepth int) (deep bool) {
 	type open struct {
 		name  string
 		style gofastcore.Style
 		start int
 	}
 	var stack []open
+	skipped := 0  // start tags past maxDepth not yet ended
+	noGT := false // no ">" is left: every "<" is text
+	seen := map[string]bool{}
+	voiceLen := 0 // of the voices joined by ", "
 	pop := func() {
 		o := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
@@ -731,9 +785,10 @@ func vttText(s []byte, w *builder, voices *[]string) {
 			}
 			i += n
 			continue
-		case c == '<':
+		case c == '<' && !noGT:
 			j := bytes.IndexByte(s[i:], '>')
 			if j < 0 {
+				noGT = true
 				break
 			}
 			tag := s[i+1 : i+j]
@@ -743,6 +798,10 @@ func vttText(s []byte, w *builder, voices *[]string) {
 			}
 			if tag[0] == '/' {
 				name := tagName(tag[1:])
+				if skipped > 0 {
+					skipped--
+					continue
+				}
 				if len(stack) == 0 {
 					continue
 				}
@@ -769,10 +828,23 @@ func vttText(s []byte, w *builder, voices *[]string) {
 					continue
 				}
 			case "v":
-				if a := annotation(tag); a != "" && !contains(*voices, a) {
+				if voiceLen > MaxVoices {
+					break // the list is full
+				}
+				if a := annotation(tag); a != "" && !seen[a] {
+					seen[a] = true
+					if len(*voices) > 0 {
+						voiceLen += 2
+					}
+					voiceLen += len(a)
 					*voices = append(*voices, a)
 				}
 			default:
+				continue
+			}
+			if len(stack) >= maxDepth {
+				skipped++
+				deep = true
 				continue
 			}
 			stack = append(stack, open{name, st, len(w.b)})
@@ -790,15 +862,7 @@ func vttText(s []byte, w *builder, voices *[]string) {
 	for len(stack) > 0 {
 		pop()
 	}
-}
-
-func contains(l []string, s string) bool {
-	for _, x := range l {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return deep
 }
 
 // tagName is the name of a tag: up to a period, white space or the end.

@@ -17,7 +17,8 @@ import (
 
 // maxSubtitleAttr bounds a cue's attribute values (timings as written,
 // settings, voices): past it a value is cut, with limit.exceeded.
-const maxSubtitleAttr = 4 << 10
+// It is the bound to which the reader collects voices.
+const maxSubtitleAttr = subtitle.MaxVoices
 
 // isWebVTT reports whether src begins, after a byte order mark, with the
 // WebVTT signature: WEBVTT followed by a space, a tab, a line end or the
@@ -38,7 +39,7 @@ func isWebVTT(src []byte) bool {
 
 // subtitleCounts counts what reading the cues found, for the warnings.
 type subtitleCounts struct {
-	unparsed, empty, stray, controls, cut, anchors, attrs int
+	unparsed, empty, stray, controls, cut, anchors, attrs, deep int
 }
 
 // subtitles reads SubRip (srt) or WebVTT (vtt) into one part of kind
@@ -156,6 +157,9 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 		if it.Cut {
 			c.cut++
 		}
+		if it.Deep {
+			c.deep++
+		}
 		if it.Kind == subtitle.Style {
 			if opts.Parts == (gofastcore.PartRange{}) {
 				stored = append(stored, b)
@@ -166,9 +170,13 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 		return true
 	}
 	var err error
+	depth := e.MaxDepth
+	if depth <= 0 {
+		depth = DefaultMaxDepth
+	}
 	if format == "vtt" {
 		var h subtitle.Header
-		h, err = subtitle.VTT(ctx, decoded, yield)
+		h, err = subtitle.VTT(ctx, decoded, depth, yield)
 		if err == nil {
 			vttMetadata(doc, &part, &h, t)
 		}
@@ -205,6 +213,10 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			count(c.attrs, "cue attribute (timing, settings or voices) is", "cue attributes (timings, settings or voices) are")+
 				fmt.Sprintf(" longer than %d KiB and cut there", maxSubtitleAttr>>10))
+	}
+	if c.deep > 0 {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			count(c.deep, "cue has tags", "cues have tags")+fmt.Sprintf(" nested more than %d deep; the deeper tags are ignored, their text kept", depth))
 	}
 	if c.anchors > 0 {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
@@ -307,8 +319,13 @@ func vttMetadata(doc *gofastcore.Document, part *gofastcore.Part, h *subtitle.He
 	}
 	t.controls += h.Controls
 	cuts, left := 0, 0
+	full := map[string]bool{} // keys whose value was cut: nothing more is joined
 	set := func(k, v string) {
 		if v == "" {
+			return
+		}
+		if full[k] {
+			cuts++
 			return
 		}
 		if doc.Metadata.Extra == nil {
@@ -320,10 +337,11 @@ func vttMetadata(doc *gofastcore.Document, part *gofastcore.Part, h *subtitle.He
 			return
 		}
 		if ok {
-			v = old + "\n" + v
+			v = old + "\n" + v[:min(len(v), blocks.MaxMeta)]
 		}
 		if len(v) > blocks.MaxMeta {
 			cuts++
+			full[k] = true
 			n := blocks.MaxMeta
 			for n > 0 && !utf8.RuneStart(v[n]) {
 				n--
