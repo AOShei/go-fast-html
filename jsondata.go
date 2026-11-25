@@ -1,6 +1,7 @@
 package gofasthtml
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -208,8 +209,8 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 // jsonComment reports whether a line is only a comment (JSON with
 // comments): it begins, after white space, with "//", "/*" or "*".
 func jsonComment(line []byte) bool {
-	t := strings.TrimLeft(string(line), " \t")
-	return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*")
+	t := bytes.TrimLeft(line, " \t")
+	return bytes.HasPrefix(t, []byte("//")) || bytes.HasPrefix(t, []byte("/*")) || bytes.HasPrefix(t, []byte("*"))
 }
 
 // syntaxPlace writes where an offset of src is: "line L, column C", the

@@ -1,6 +1,7 @@
 package gofasthtml
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -183,5 +184,6 @@ func keyLabel(b []byte) string {
 
 // yamlComment reports whether a line is only a comment.
 func yamlComment(line []byte) bool {
-	return strings.HasPrefix(strings.TrimLeft(string(line), " \t"), "#")
+	t := bytes.TrimLeft(line, " \t")
+	return len(t) > 0 && t[0] == '#'
 }

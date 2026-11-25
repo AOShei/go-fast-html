@@ -101,6 +101,8 @@ type dFrame struct {
 	cells   []dCell
 	path    string
 	pathSet bool
+	// pathLong: the path is longer than maxPath; its members have none.
+	pathLong bool
 
 	group struct {
 		first, last dUnit
@@ -617,27 +619,30 @@ func lineStart(b []byte, pos int) int {
 // it there, and then over the comment lines just above it, blank lines
 // between them included; never before the last block's end.
 func (s *dSplitter) extendStart(pos int) int {
-	ls := lineStart(s.src, pos)
-	if ls < s.lastEnd {
-		return pos
-	}
-	for i := ls; i < pos; i++ {
-		c := s.src[i]
-		if c == ' ' || c == '\t' || s.format == "yaml" && c == '-' && i+1 < len(s.src) && (s.src[i+1] == ' ' || s.src[i+1] == '\t') {
+	// Back over the white space before pos only: a long line is not
+	// looked at again for each member on it.
+	ls := pos
+	for ls > 0 && s.src[ls-1] != '\n' && s.src[ls-1] != '\r' {
+		c := s.src[ls-1]
+		if c == ' ' || c == '\t' || s.format == "yaml" && c == '-' && ls < len(s.src) && (s.src[ls] == ' ' || s.src[ls] == '\t') {
+			ls--
 			continue
 		}
 		return pos
 	}
+	if ls < s.lastEnd {
+		return pos
+	}
 	start := ls
 	for at := ls; at > s.lastEnd; {
-		prev := lineStart(s.src, at-1)
-		if at-1 > 0 && s.src[at-1] == '\n' && s.src[at-2] == '\r' {
-			prev = lineStart(s.src, at-2)
+		end := at - 1 // the line end before at
+		if end > 0 && s.src[end] == '\n' && s.src[end-1] == '\r' {
+			end--
 		}
-		if prev < s.lastEnd {
+		prev := lineStartAbove(s.src, end, s.lastEnd)
+		if prev < 0 {
 			break
 		}
-		end, _ := lineAt(s.src, prev)
 		line := s.src[prev:end]
 		switch {
 		case s.comment != nil && s.comment(line):
@@ -657,9 +662,10 @@ func (s *dSplitter) extendEnd(pos int) int {
 	if s.comment == nil {
 		return pos
 	}
-	end, _ := lineAt(s.src, pos)
+	// Only the bytes up to the first other one are looked at, so that a
+	// long line is not read again for each member on it.
 	i := pos
-	for i < end {
+	for i < len(s.src) {
 		c := s.src[i]
 		if c == ' ' || c == '\t' || c == ',' || c == ']' || c == '}' {
 			i++
@@ -667,8 +673,44 @@ func (s *dSplitter) extendEnd(pos int) int {
 		}
 		break
 	}
-	if i < end && s.comment(s.src[i:end]) {
+	if i >= len(s.src) {
+		return pos
+	}
+	switch {
+	case s.format == "yaml" && s.src[i] == '#',
+		s.format == "json" && i+1 < len(s.src) && s.src[i] == '/' && s.src[i+1] == '/':
+		end, _ := lineAt(s.src, i)
 		return end
+	case s.format == "json" && i+1 < len(s.src) && s.src[i] == '/' && s.src[i+1] == '*':
+		// A block comment: the end of the line when nothing follows it
+		// there, or when it runs on past the line.
+		j := bytes.Index(s.src[i+2:], []byte("*/"))
+		if j < 0 {
+			end, _ := lineAt(s.src, i)
+			return end
+		}
+		close := i + 2 + j + 2
+		if k := bytes.IndexAny(s.src[i:close], "\r\n"); k >= 0 {
+			return i + k
+		}
+		for close < len(s.src) && (s.src[close] == ' ' || s.src[close] == '\t') {
+			close++
+		}
+		if close == len(s.src) || s.src[close] == '\n' || s.src[close] == '\r' {
+			return close
+		}
+	}
+	return pos
+}
+
+// lineStartAbove returns the start of the line that ends at pos, or -1
+// when it begins before floor (which is not looked past).
+func lineStartAbove(b []byte, pos, floor int) int {
+	for pos > 0 && b[pos-1] != '\n' && b[pos-1] != '\r' {
+		if pos <= floor {
+			return -1
+		}
+		pos--
 	}
 	return pos
 }
@@ -726,7 +768,7 @@ const maxPath = 1024
 // maxPath.
 func (s *dSplitter) path(p *dFrame, u dUnit) string {
 	fp := s.framePath(p)
-	if len(fp) > maxPath {
+	if p.pathLong {
 		return ""
 	}
 	if path := fp + s.segment(p, u); len(path) <= maxPath {
@@ -735,6 +777,9 @@ func (s *dSplitter) path(p *dFrame, u dUnit) string {
 	return ""
 }
 
+// framePath returns the path of the open container f; empty, and
+// f.pathLong set, when it is longer than maxPath: no longer path is built
+// below it.
 func (s *dSplitter) framePath(f *dFrame) string {
 	if f.pathSet {
 		return f.path
@@ -745,7 +790,14 @@ func (s *dSplitter) framePath(f *dFrame) string {
 		}
 		if i > 0 {
 			p := s.stack[i-1]
-			f.path = s.framePath(p) + s.segment(p, f.unit)
+			pp := s.framePath(p)
+			if p.pathLong {
+				f.pathLong = true
+			} else if path := pp + s.segment(p, f.unit); len(path) > maxPath {
+				f.pathLong = true
+			} else {
+				f.path = path
+			}
 		}
 		f.pathSet = true
 		return f.path
