@@ -102,8 +102,8 @@ type dFrame struct {
 	cells   []dCell
 	// the start and end of the last member taken while split
 	lastStart, last int
-	path    string
-	pathSet bool
+	path            string
+	pathSet         bool
 	// pathLong: the path is longer than maxPath; its members have none.
 	pathLong bool
 
