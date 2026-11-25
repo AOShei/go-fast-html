@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **Subtitles and captions: SubRip (`srt`) and WebVTT (`vtt`).** One part
+  of kind `body`, a `paragraph` per cue in file order: its text as a viewer
+  sees it (markup removed, WebVTT character references decoded, lines
+  joined with `\n`), `Loc.Offset`/`Length` from the cue's identifier or
+  timing line to its last text line, `Loc.Anchor` the WebVTT identifier or
+  SubRip number, and `Attrs` `start` and `end` (`HH:MM:SS.mmm`),
+  `settings` and `voice`. With `Options.Spans`, bold, italic and underline.
+  WebVTT `NOTE` blocks are notes stored as markup comments where they
+  stand, `STYLE` blocks go to the stored part, `REGION` definitions and
+  header lines to `Metadata.Extra` (`vtt.`), `Language` to
+  `Metadata.Language`. `Detect` reads `.srt`, `.vtt`, `.webvtt` and the
+  WebVTT signature; the command has `-as srt` and `-as vtt`. UTF-32 with a
+  byte order mark is decoded for these two formats, and text of no
+  certain encoding is read as windows-1252 with `text.encoding_detected`
+  rather than refused. See the README's "Subtitles".
+- The 57 SubRip and 83 WebVTT files of the corpus's dev set read with no
+  error and pass `Validate`, with every block's words in the input at its
+  `Loc` and one cue per line with `-->` (`TestSubtitleCorpus`).
+
 ## v0.4.4 (2026-11-24)
 
 - **Fixed: the type of an image in a `data:` URI could be overwritten**
