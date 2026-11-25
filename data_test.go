@@ -201,7 +201,8 @@ func TestDataWorstCase(t *testing.T) {
 //
 //	go test -run XXX -fuzz FuzzData -fuzztime 30s -fuzzminimizetime 0s
 func FuzzData(f *testing.F) {
-	for _, s := range []string{"{\"a\": [1, 2]}\n", "a: 1\n---\nb: 2\n...\n", "\xFF\xFEa\x00", "\r\n\r\n---", "caf\xe9\x01\x85"} {
+	for _, s := range []string{"{\"a\": [1, 2]}\n", "a: 1\n---\nb: 2\n...\n", "\xFF\xFEa\x00", "\r\n\r\n---", "caf\xe9\x01\x85",
+		"[{\"a\": 1}, {\"a\": 2, \"b\": \"x\"}]", "- {a: 1}\n- {a: 2}\n", "// c\n{\"a\": 1, // d\n}\n# e", "? [a]\n: b\n&x c: *x\n"} {
 		f.Add([]byte(s), false)
 	}
 	f.Fuzz(func(t *testing.T, b []byte, small bool) {
@@ -222,32 +223,33 @@ func FuzzData(f *testing.F) {
 			if err := doc.Validate(); err != nil {
 				t.Fatalf("Validate: %v", err)
 			}
-			var texts []string
+			// Blocks are in file order and do not overlap; in UTF-8 input,
+			// a code block's text is the input at its location.
+			exact := utf8.Valid(b) && !bytes.HasPrefix(b, []byte("\xEF\xBB\xBF")) && !hasWarning(doc, gofastcore.WarnTextEncodingDetected)
+			end := int64(0)
 			for i, bl := range doc.Parts[0].Blocks {
-				if bl.Kind != gofastcore.KindCode || bl.Attrs[gofastcore.AttrLanguage] != format {
-					t.Fatalf("block %d: %v %v", i, bl.Kind, bl.Attrs)
+				l := bl.Loc
+				if l.Offset < end || l.Offset+l.Length > int64(len(b)) {
+					t.Fatalf("block %d at %d+%d after %d", i, l.Offset, l.Length, end)
 				}
-				texts = append(texts, bl.Text)
-			}
-			// JSON in UTF-8, read whole: the blocks joined with line feeds
-			// are the input's lines, control characters dropped, blank
-			// lines at the start and end left out.
-			// (Valid UTF-8 with zero bytes may be UTF-16.)
-			if format == "json" && !small && utf8.Valid(b) && !bytes.HasPrefix(b, []byte("\xEF\xBB\xBF")) && !hasWarning(doc, gofastcore.WarnTextEncodingDetected) {
-				var lines []string
-				for pos := 0; pos < len(b); {
-					l, next := dataNextLine(b, pos)
-					lines = append(lines, string(l.text))
-					pos = next
-				}
-				for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
-					lines = lines[1:]
-				}
-				for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-					lines = lines[:len(lines)-1]
-				}
-				if got, want := strings.Join(texts, "\n"), strings.Join(lines, "\n"); got != want {
-					t.Fatalf("joined blocks:\n%q\nwant\n%q", got, want)
+				end = l.Offset + l.Length
+				switch bl.Kind {
+				case gofastcore.KindCode:
+					if bl.Attrs[gofastcore.AttrLanguage] != format {
+						t.Fatalf("block %d: %v", i, bl.Attrs)
+					}
+					n := 0
+					if got := cleanCode(b[l.Offset:end], &n); exact && got != bl.Text {
+						t.Fatalf("block %d: %q at its location, text %q", i, got, bl.Text)
+					}
+				case gofastcore.KindTable:
+					for r, rl := range bl.Table.RowLocs[1:] {
+						if rl.Offset < l.Offset || rl.Offset+rl.Length > end || rl.Anchor == "" {
+							t.Fatalf("block %d row %d at %+v", i, r+1, rl)
+						}
+					}
+				default:
+					t.Fatalf("block %d: kind %v", i, bl.Kind)
 				}
 			}
 		}

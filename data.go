@@ -86,7 +86,9 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 		if doc.Metadata.Extra == nil {
 			doc.Metadata.Extra = map[string]string{}
 		}
-		doc.Metadata.Extra[format+".syntax_error"] = synErr
+		msg, n := cleanMeta(synErr) // the message may quote the input
+		t.controls += n
+		doc.Metadata.Extra[format+".syntax_error"] = msg
 	}
 	if s != nil {
 		if s.spent {

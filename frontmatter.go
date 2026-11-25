@@ -2,6 +2,8 @@ package gofasthtml
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -24,6 +26,8 @@ const (
 	// maxFrontMatterKeys bounds the values of front matter put in the
 	// metadata; the rest are in its block only.
 	maxFrontMatterKeys = 256
+	// maxFrontMatterKey bounds a key path in Metadata.Extra.
+	maxFrontMatterKey = 1024
 )
 
 // frontMatter is the front matter found at the start of a Markdown text.
@@ -33,6 +37,9 @@ type frontMatter struct {
 	cstart, cend int    // the content between the fences
 	values       []fmValue
 	valuesCut    bool // more than maxFrontMatterKeys values
+	// notYAML is why YAML front matter is not YAML, when its values were
+	// read line by line instead.
+	notYAML string
 }
 
 // fmValue is one value of the front matter: its key path and its text
@@ -65,8 +72,15 @@ func findFrontMatter(src []byte) (frontMatter, bool) {
 			content := src[cstart:pos]
 			if fence == "---" {
 				fm.lang = "yaml"
-				values, cut, ok := yamlFrontMatter(content)
-				if !ok {
+				values, cut, why := yamlFrontMatter(content)
+				if why != "" {
+					// Front matter that is not YAML, as Cursor's rules
+					// write it (globs: **/*.ts), is read line by line
+					// when every line is key: value or under one.
+					if values, cut, ok := looseFrontMatter(content); ok {
+						fm.values, fm.valuesCut, fm.notYAML = values, cut, why
+						return fm, true
+					}
 					return frontMatter{}, false
 				}
 				fm.values, fm.valuesCut = values, cut
@@ -93,7 +107,7 @@ func fenceLine(src []byte, pos int, fence string) bool {
 // value is a mapping, or nothing. Scalars and lists of scalars are
 // values, under their key path (a.b for a nested mapping, a[0].b inside a
 // list).
-func yamlFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
+func yamlFrontMatter(content []byte) (values []fmValue, cut bool, why string) {
 	p := yaml.NewParser(content, yaml.Limits{MaxDepth: 64})
 	type open struct {
 		mapping bool
@@ -133,13 +147,17 @@ func yamlFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
 			break
 		}
 		if err != nil {
-			return nil, false, false
+			var se *yaml.SyntaxError
+			if errors.As(err, &se) {
+				return nil, false, fmt.Sprintf("line %d, column %d: %s", se.Line+1, se.Column, se.Msg)
+			}
+			return nil, false, err.Error()
 		}
 		switch ev.Kind {
 		case yaml.DocumentStart:
 			docs++
 			if docs > 1 {
-				return nil, false, false
+				return nil, false, "more than one document"
 			}
 			continue
 		case yaml.StreamStart, yaml.StreamEnd, yaml.DocumentEnd:
@@ -154,13 +172,13 @@ func yamlFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
 			case ev.Kind == yaml.Scalar && ev.Value == "" && ev.Style == yaml.Plain:
 				continue
 			}
-			return nil, false, false
+			return nil, false, "not a mapping"
 		}
 		top := stack[len(stack)-1]
 		if top.mapping && top.atKey && ev.Kind != yaml.MappingEnd {
 			top.atKey = false
 			if ev.Kind != yaml.Scalar {
-				return nil, false, false // a complex key: not front matter as tools read it
+				return nil, false, "a key that is not a scalar"
 			}
 			key = ev.Value
 			continue
@@ -206,7 +224,78 @@ func yamlFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
 			add(fmValue{path: child(top), items: []string{v}})
 		}
 	}
-	return values, cut, true
+	return values, cut, ""
+}
+
+// looseFrontMatter reads front matter that is not YAML line by line:
+// "key: value" lines at the start of the line, a value in quotes taken
+// out of them, and lines under a key with no value as its list ("- item")
+// or its text. It is front matter only when every line with text is one
+// of these (or a comment) and there is a key.
+func looseFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
+	var cur *fmValue
+	flush := func() {
+		if cur == nil {
+			return
+		}
+		if len(values) >= maxFrontMatterKeys {
+			cut = true
+		} else if len(cur.items) > 0 {
+			values = append(values, *cur)
+		}
+		cur = nil
+	}
+	for pos := 0; pos < len(content); {
+		end, next := lineAt(content, pos)
+		line := string(content[pos:end])
+		pos = next
+		t := strings.TrimSpace(line)
+		switch {
+		case t == "" || t[0] == '#':
+			continue
+		case line[0] == ' ' || line[0] == '\t':
+			if cur == nil {
+				return nil, false, false
+			}
+			if item, ok := strings.CutPrefix(t, "- "); ok || t == "-" {
+				cur.items, cur.list = append(cur.items, unquote(strings.TrimSpace(item))), true
+			} else if len(cur.items) > 0 && !cur.list {
+				cur.items[0] += " " + t
+			} else {
+				cur.items = append(cur.items, t)
+			}
+			continue
+		}
+		colon := strings.IndexByte(line, ':')
+		if colon <= 0 || !looseKey(line[:colon]) {
+			return nil, false, false
+		}
+		flush()
+		cur = &fmValue{path: line[:colon]}
+		if v := strings.TrimSpace(line[colon+1:]); v != "" {
+			cur.items = []string{unquote(v)}
+		}
+	}
+	flush()
+	return values, cut, len(values) > 0 || cut
+}
+
+// looseKey reports whether k is a key of loose front matter.
+func looseKey(k string) bool {
+	for _, c := range k {
+		if !(c == '_' || c == '-' || c == '.' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// unquote takes a value out of the quotes around it, if it has them.
+func unquote(v string) string {
+	if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
+		return v[1 : len(v)-1]
+	}
+	return v
 }
 
 // tomlFrontMatter reads the values of TOML front matter that are simple:
@@ -404,7 +493,12 @@ func applyFrontMatter(md *gofastcore.Metadata, fm frontMatter, ctl *int) (cut in
 				continue
 			}
 		}
-		extra(ExtraFrontMatterPrefix+v.path, one)
+		key, c := cleanMeta(v.path)
+		*ctl += c
+		if len(key) > maxFrontMatterKey {
+			key, cut = cutUTF8(key, maxFrontMatterKey), cut+1
+		}
+		extra(ExtraFrontMatterPrefix+key, one)
 	}
 	return cut
 }

@@ -323,7 +323,7 @@ func (s *Scanner) skipString() error {
 				}
 				i += 6
 			default:
-				return &Error{Offset: i, Msg: fmt.Sprintf("the escape \\%c", s.src[i+1])}
+				return &Error{Offset: i, Msg: "the escape \\" + strconv.QuoteRune(rune(s.src[i+1]))}
 			}
 		default:
 			i++

@@ -69,6 +69,8 @@ jobs:
           go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 20s -fuzzminimizetime 0s ./internal/dom
           go test -run '^$' -fuzz '^FuzzLexer$' -fuzztime 20s -fuzzminimizetime 0s ./internal/lexer
           go test -run '^$' -fuzz '^FuzzMarkdown$' -fuzztime 20s -fuzzminimizetime 0s ./internal/md
+          go test -run '^$' -fuzz '^FuzzScan$' -fuzztime 20s -fuzzminimizetime 0s ./internal/jsonscan
+          go test -run '^$' -fuzz '^FuzzParser$' -fuzztime 20s -fuzzminimizetime 0s ./internal/yaml
 
   dependencies:
     # The series rule: the standard library and go-fast modules only.

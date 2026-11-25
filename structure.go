@@ -316,7 +316,6 @@ func (s *dSplitter) add(p *dFrame, u dUnit) {
 		return
 	}
 	if !p.obj && u.record && s.fits(p, u) {
-		s.flushGroup(p)
 		s.addRow(p, u)
 		return
 	}
@@ -452,6 +451,11 @@ func (s *dSplitter) addRow(p *dFrame, u dUnit) {
 		}
 	}
 	r.rows = append(r.rows, u)
+	if len(r.rows) == 2 && r.pieces == 0 {
+		// A run of two records is a table: what is before it is made
+		// first. (A lone record joins the members around it.)
+		s.flushGroup(p)
+	}
 	if len(r.rows) >= csvRowsPerBlock || len(r.rows)*len(r.cols) >= csvCellsPerBlock {
 		s.table(p)
 	}
@@ -714,9 +718,21 @@ func hasControl(v string) bool {
 	return false
 }
 
-// path returns the path of u, a member of p.
+// maxPath bounds a path used as Loc.Anchor: a longer one is left out, as
+// an HTML id over 1,024 bytes is.
+const maxPath = 1024
+
+// path returns the path of u, a member of p; empty when it is longer than
+// maxPath.
 func (s *dSplitter) path(p *dFrame, u dUnit) string {
-	return s.framePath(p) + s.segment(p, u)
+	fp := s.framePath(p)
+	if len(fp) > maxPath {
+		return ""
+	}
+	if path := fp + s.segment(p, u); len(path) <= maxPath {
+		return path
+	}
+	return ""
 }
 
 func (s *dSplitter) framePath(f *dFrame) string {
@@ -744,6 +760,9 @@ func (s *dSplitter) segment(p *dFrame, u dUnit) string {
 		return "[" + strconv.Itoa(u.index) + "]"
 	}
 	k := s.keyText(u.key)
+	if len(k) > maxPath {
+		k = k[:maxPath+1] // longer than a path may be: it is left out
+	}
 	if !plainKey(k) {
 		return "[" + strconv.Quote(k) + "]"
 	}

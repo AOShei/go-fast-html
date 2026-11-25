@@ -1,6 +1,7 @@
 package gofasthtml
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
 )
@@ -26,6 +28,7 @@ func corpusDir() string {
 
 // corpusTally counts what extraction did over one set of files.
 type corpusTally struct {
+	kinds                            map[string]int // what JSON, YAML and front matter gave
 	files, panics, timeouts, invalid int
 	errors                           map[string]int
 	display                          map[string]int // blocks by reason
@@ -67,13 +70,17 @@ func TestCorpus(t *testing.T) {
 	opts := &gofastcore.Options{Limits: gofastcore.Limits{
 		MaxInputBytes: 64 << 20, MaxDecodedBytes: 128 << 20, MaxTextBytes: 32 << 20}}
 	for _, set := range []string{"dev", "heldout"} {
-		for _, format := range []string{"html", "md", "epub", "mht"} {
-			dir := filepath.Join(root, set, format)
+		for _, dirName := range []string{"html", "md", "epub", "mht", "json", "jsonl", "yaml", "md-frontmatter"} {
+			format := map[string]string{"jsonl": "json", "md-frontmatter": "md"}[dirName]
+			if format == "" {
+				format = dirName
+			}
+			dir := filepath.Join(root, set, dirName)
 			ents, err := os.ReadDir(dir)
 			if err != nil {
 				continue
 			}
-			c := corpusTally{errors: map[string]int{}, display: map[string]int{}, displayFiles: map[string]int{}, warnings: map[string]int{}}
+			c := corpusTally{errors: map[string]int{}, display: map[string]int{}, displayFiles: map[string]int{}, warnings: map[string]int{}, kinds: map[string]int{}}
 			for _, ent := range ents {
 				if ent.IsDir() {
 					continue
@@ -84,7 +91,9 @@ func TestCorpus(t *testing.T) {
 				if set != "dev" {
 					name = fmt.Sprintf("held-out file %d", c.files)
 				}
-				doc, err, panicked, timedOut := corpusExtract(path, format, opts)
+				fopts := *opts
+				fopts.Name = ent.Name() // .jsonl is JSON Lines
+				doc, err, panicked, timedOut := corpusExtract(path, format, &fopts)
 				switch {
 				case panicked != "":
 					c.panics++
@@ -119,6 +128,9 @@ func TestCorpus(t *testing.T) {
 						t.Logf("warn dev/%s/%s part %d %s: %s", format, name, n, w.Code, w.Message)
 					}
 				}
+				if format == "json" || format == "yaml" || dirName == "md-frontmatter" {
+					c.structured(t, set, dirName, name, path, doc)
+				}
 				seen := map[string]bool{}
 				for p, b := range doc.AllBlocks() {
 					if b.Display == 0 {
@@ -138,8 +150,8 @@ func TestCorpus(t *testing.T) {
 					}
 				}
 			}
-			t.Logf("%-7s %-4s files=%d errors{%s} invalid=%d panics=%d timeouts=%d blocks{%s} files{%s} warnings{%s}",
-				set, format, c.files, keys(c.errors), c.invalid, c.panics, c.timeouts, keys(c.display), keys(c.displayFiles), keys(c.warnings))
+			t.Logf("%-7s %-4s files=%d errors{%s} invalid=%d panics=%d timeouts=%d blocks{%s} files{%s} warnings{%s} kinds{%s}",
+				set, dirName, c.files, keys(c.errors), c.invalid, c.panics, c.timeouts, keys(c.display), keys(c.displayFiles), keys(c.warnings), keys(c.kinds))
 		}
 	}
 }
@@ -172,5 +184,60 @@ func corpusExtract(path, format string, opts *gofastcore.Options) (doc *gofastco
 		return r.doc, r.err, r.panic, false
 	case <-time.After(12 * time.Second):
 		return nil, nil, "", true
+	}
+}
+
+// structured checks a JSON, YAML or Markdown file with front matter and
+// counts what it gave: in a file that is UTF-8, every code block's text
+// is the input at its location; blocks are in file order; every table
+// row's location is inside its table; a front matter block comes first.
+func (c *corpusTally) structured(t *testing.T, set, dir, name, path string, doc *gofastcore.Document) {
+	t.Helper()
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact := utf8.Valid(src) && !bytes.HasPrefix(src, []byte("\xEF\xBB\xBF"))
+	fail := func(format string, args ...any) {
+		if set == "dev" {
+			t.Errorf("dev/%s/%s: "+format, append([]any{dir, name}, args...)...)
+		} else {
+			t.Errorf("%s/%s: %s: a structure check fails", set, dir, name)
+		}
+	}
+	if doc.Metadata.Extra["json.syntax_error"] != "" || doc.Metadata.Extra["yaml.syntax_error"] != "" {
+		c.add(c.kinds, "read as lines")
+	}
+	end := int64(0)
+	for i, b := range doc.Parts[0].Blocks {
+		if b.Attrs[AttrFrontMatter] != "" {
+			c.add(c.kinds, "front matter")
+			if i != 0 {
+				fail("front matter is block %d", i)
+			}
+		}
+		if dir == "md-frontmatter" {
+			continue
+		}
+		c.add(c.kinds, b.Kind.String())
+		l := b.Loc
+		if l.Offset < end || l.Offset+l.Length > int64(len(src)) {
+			fail("block %d at %d+%d after %d", i, l.Offset, l.Length, end)
+			return
+		}
+		end = l.Offset + l.Length
+		switch b.Kind {
+		case gofastcore.KindCode:
+			n := 0
+			if got := cleanCode(src[l.Offset:end], &n); exact && got != b.Text {
+				fail("block %d: its text is not the input at its location", i)
+			}
+		case gofastcore.KindTable:
+			for r, rl := range b.Table.RowLocs[1:] {
+				if rl.Offset < l.Offset || rl.Offset+rl.Length > end {
+					fail("block %d row %d outside the table", i, r+1)
+				}
+			}
+		}
 	}
 }
