@@ -3,10 +3,13 @@ package gofasthtml
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/charset"
+	"github.com/AOShei/go-fast-html/internal/jsonscan"
+	"github.com/AOShei/go-fast-html/internal/yaml"
 )
 
 // A JSON or YAML document longer than this is split at line ends into
@@ -62,6 +65,7 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 	var (
 		s      *dSplitter
 		synErr string
+		deep   bool // nested deeper than the bound: read as lines
 	)
 	switch format {
 	case "json":
@@ -70,7 +74,11 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 			return nil, err
 		}
 		s = sp
-		if se != nil {
+		switch {
+		case se == nil:
+		case se.Msg == jsonscan.ErrDepth:
+			deep = true
+		default:
 			synErr = syntaxPlace(decoded, se.Offset) + ": " + se.Msg
 		}
 	case "yaml":
@@ -79,11 +87,21 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 			return nil, err
 		}
 		s = sp
-		if se != nil {
+		switch {
+		case se == nil:
+		case errors.Is(se, yaml.ErrDepth):
+			deep = true
+		default:
 			synErr = syntaxPlace(decoded, se.Offset) + ": " + se.Msg
 		}
 	}
-	if synErr != "" {
+	if deep {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the nesting is deeper than %d; the file was read as lines", jsonscan.DefaultMaxDepth))
+	}
+	// Text cut by the decode budget was not read to its end: that it does
+	// not end as JSON or YAML says nothing about the file.
+	if synErr != "" && !cut {
 		if doc.Metadata.Extra == nil {
 			doc.Metadata.Extra = map[string]string{}
 		}

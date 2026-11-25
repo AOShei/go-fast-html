@@ -179,11 +179,17 @@ func TestStructJSONNotJSON(t *testing.T) {
 	if got := doc.Metadata.Extra[ExtraJSONSyntaxError]; got != `line 2, column 6: '2' where ':' is expected after a key` {
 		t.Errorf("syntax error: %q", got)
 	}
-	// Nesting past the bound is not read as JSON.
+	// Nesting past the bound is read as lines, a limit and not an error.
 	deep := strings.Repeat("[", 600) + strings.Repeat("]", 600)
 	doc = dataDoc(t, "d.json", deep, nil)
-	if doc.Metadata.Extra[ExtraJSONSyntaxError] == "" || len(doc.Parts[0].Blocks) != 1 {
-		t.Errorf("deep: %+v", doc.Metadata.Extra)
+	if doc.Metadata.Extra[ExtraJSONSyntaxError] != "" || len(doc.Parts[0].Blocks) != 1 ||
+		len(csvWarnings(doc, gofastcore.WarnLimitExceeded)) != 1 {
+		t.Errorf("deep: %+v %+v", doc.Metadata.Extra, doc.Parts[0].Warnings)
+	}
+	ydeep := strings.Repeat("[", 600) + strings.Repeat("]", 600)
+	doc = dataDoc(t, "d.yaml", ydeep, nil)
+	if doc.Metadata.Extra[ExtraYAMLSyntaxError] != "" || len(csvWarnings(doc, gofastcore.WarnLimitExceeded)) != 1 {
+		t.Errorf("deep yaml: %+v %+v", doc.Metadata.Extra, doc.Parts[0].Warnings)
 	}
 	// Bytes that are not UTF-8 are U+FFFD: JSON is UTF-8.
 	doc = dataDoc(t, "u.json", "[\"\xff\x01\"]", nil)
