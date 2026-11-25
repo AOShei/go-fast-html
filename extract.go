@@ -94,24 +94,27 @@ const (
 )
 
 // Extractor extracts HTML, Markdown, plain text, EPUB, comma- and
-// tab-separated values, Jupyter notebooks, and JSON and YAML as text. The
+// tab-separated values, Jupyter notebooks, JSON and YAML as text, and web
+// pages saved as one file (MHTML). The
 // zero value is ready to use and safe for concurrent use.
 type Extractor struct {
 	// Format is the format to read the input as: "html", "md", "txt",
-	// "epub", "csv", "tsv", "ipynb", "json" or "yaml". Empty means to
-	// decide it with Detect.
+	// "epub", "csv", "tsv", "ipynb", "json", "yaml", "mht", "srt" (SubRip)
+	// or "vtt" (WebVTT). Empty means to decide it with Detect.
 	Format string
 	// MaxDepth bounds how deeply elements nest in the tree that is read.
 	// Zero means DefaultMaxDepth.
 	MaxDepth int
-	// MaxArchiveMembers bounds the number of files in an EPUB's archive.
+	// MaxArchiveMembers bounds the number of files in an EPUB's archive,
+	// and the number of parts of an MHTML file.
 	// Zero means DefaultMaxArchiveMembers; negative means no limit.
 	MaxArchiveMembers int
 	// Charset is the character encoding the input comes with from outside
 	// it, as a label such as the charset parameter of a MIME Content-Type
 	// gives it ("windows-1251", "shift_jis"): the transport-layer encoding
 	// of the WHATWG encoding sniffing. It applies to HTML, Markdown, plain
-	// text, CSV, TSV, JSON and YAML, not to the chapters of an EPUB. A byte order mark
+	// text, CSV, TSV, JSON and YAML, and to the page of an MHTML file whose
+	// part declares no charset; not to the chapters of an EPUB. A byte order mark
 	// overrides it; it overrides a <meta> declaration and detection. A
 	// label that names no encoding this library decodes is ignored, with
 	// the warning html.charset_unsupported. Empty means none.
@@ -140,11 +143,13 @@ var _ gofastcore.Extractor = (*Extractor)(nil)
 
 var mimeTypes = map[string]string{"html": "text/html", "md": "text/markdown", "txt": "text/plain", "epub": "application/epub+zip",
 	"csv": "text/csv", "tsv": "text/tab-separated-values", "ipynb": "application/x-ipynb+json",
-	"json": "application/json", "yaml": "application/yaml"}
+	"json": "application/json", "yaml": "application/yaml", "mht": "multipart/related",
+	"srt": "application/x-subrip", "vtt": "text/vtt"}
 
 // Formats lists the formats this library extracts.
 func (e *Extractor) Formats() []string {
-	return []string{"html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml"}
+	return []string{"html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml", "mht",
+		"srt", "vtt"}
 }
 
 // Detect decides the format of an input from its name, and failing that
@@ -152,9 +157,15 @@ func (e *Extractor) Formats() []string {
 // HTML; .md, .markdown, .mdown, .mkd, .mkdn or .mdwn Markdown; .txt or
 // .text plain text; .epub EPUB; .csv comma-separated values; .tsv or
 // .tab tab-separated values; .ipynb a Jupyter notebook; .json, .jsonl,
-// .ndjson or .geojson JSON; .yaml or .yml YAML. A zip archive
+// .ndjson or .geojson JSON; .yaml or .yml YAML; .mht or .mhtml a web
+// page saved as one file (MHTML); .srt SubRip; .vtt or .webvtt WebVTT. A
+// file whose header is that of an MHTML file a browser saved (a
+// Snapshot-Content-Location field, or From "<Saved by ...>", with a
+// multipart/related Content-Type) is MHTML whatever its name. A zip archive
 // whose first member is "mimetype" saying application/epub+zip is EPUB
-// whatever its name.
+// whatever its name, and a text that begins, after a byte order mark,
+// with WEBVTT followed by a space, a tab, a line end or nothing is
+// WebVTT; SubRip is not guessed from content.
 // Without one of those, an input that begins with
 // markup, or has a tag of a common HTML element in its first 4 KiB, is
 // HTML, and any other plain text: Markdown, CSV, notebooks, JSON and YAML
@@ -181,9 +192,21 @@ func Detect(name string, src []byte) string {
 		return "json"
 	case ".yaml", ".yml":
 		return "yaml"
+	case ".mht", ".mhtml":
+		return "mht"
+	case ".srt":
+		return "srt"
+	case ".vtt", ".webvtt":
+		return "vtt"
 	}
 	if bytes.HasPrefix(src, []byte("PK\x03\x04")) && len(src) >= 58 && string(src[30:58]) == "mimetypeapplication/epub+zip" {
 		return "epub"
+	}
+	if isMHTML(src) {
+		return "mht"
+	}
+	if isWebVTT(src) {
+		return "vtt"
 	}
 	head := src[:min(len(src), 4096)]
 	if bytes.HasPrefix(head, []byte{0xFF, 0xFE}) || bytes.HasPrefix(head, []byte{0xFE, 0xFF}) {
@@ -266,7 +289,8 @@ func (e *Extractor) ExtractFile(ctx context.Context, path string, opts *gofastco
 // of its spine; csv and tsv are one part of kind sheet, named by the
 // file, whose rows are table blocks; a notebook is one part of kind body;
 // JSON and YAML are one part of kind body of code blocks, their text as
-// written.
+// written; SubRip and WebVTT are one part of kind body, a paragraph per
+// cue (see subtitles.go).
 // With the whole document (Options.Parts unset), script and
 // style text, hidden form values and an EPUB's images no chapter shows
 // follow in a part of kind stored.
@@ -313,7 +337,7 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 		format = Detect(opts.Name, src)
 	}
 	switch format {
-	case "html", "md", "txt", "csv", "tsv", "json", "yaml", "ipynb":
+	case "html", "md", "txt", "csv", "tsv", "json", "yaml", "ipynb", "srt", "vtt":
 		// What these keep of the input is copied (TestInputReused), so
 		// its buffer goes to the next input. An EPUB's is not reused.
 		defer releaseInput(src)
@@ -342,11 +366,17 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 	if format == "csv" || format == "tsv" {
 		return e.csv(ctx, doc, src, format, opts, text, decode)
 	}
+	if format == "mht" {
+		return e.mhtml(ctx, doc, src, opts, text, decode)
+	}
 	if format == "ipynb" {
 		return e.notebook(ctx, doc, src, opts, text, decode)
 	}
 	if format == "json" || format == "yaml" {
 		return e.dataText(ctx, doc, src, format, opts, text, decode)
+	}
+	if format == "srt" || format == "vtt" {
+		return e.subtitles(ctx, doc, src, format, opts, text, decode)
 	}
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}
 	t := &tally{}

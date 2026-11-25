@@ -1,14 +1,15 @@
-// Command gofasthtml extracts HTML, Markdown, plain text, EPUB, CSV and
-// TSV files into the shared document model of the go-fast libraries and
+// Command gofasthtml extracts HTML, Markdown, plain text, EPUB, CSV,
+// TSV, notebooks, JSON, YAML and MHTML files into the shared document model of the go-fast libraries and
 // prints them as JSON, Markdown or plain text.
 //
 //	gofasthtml [flags] file-or-directory...
 //
 // The format of each input is decided by its extension (.html, .htm,
-// .md, .markdown, .txt, .epub, .csv, .tsv, .ipynb, .json, .yaml, ...) and, failing
-// that, by its content: an EPUB's mimetype member, or markup; -as sets it. A directory
-// stands for the HTML, Markdown, text, EPUB, CSV, TSV and notebook files
-// in it and
+// .md, .markdown, .txt, .epub, .csv, .tsv, .ipynb, .json, .yaml, .mht,
+// .srt, .vtt, ...) and, failing that, by its content: an EPUB's mimetype
+// member, a WebVTT signature, or markup; -as sets it. A directory
+// stands for the HTML, Markdown, text, EPUB, CSV, TSV, notebook, JSON,
+// YAML, MHTML, SubRip and WebVTT files in it and
 // below it; "-" is
 // standard input. With one input the
 // JSON is indented; with several, each document is one line. Only the
@@ -26,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -53,6 +55,8 @@ var extensions = map[string]bool{
 	".epub": true,
 	".csv":  true, ".tsv": true, ".tab": true, ".ipynb": true,
 	".json": true, ".jsonl": true, ".ndjson": true, ".geojson": true, ".yaml": true, ".yml": true,
+	".mht": true, ".mhtml": true,
+	".srt": true, ".vtt": true, ".webvtt": true,
 }
 
 // run is the command: it reads args and writes documents to stdout and
@@ -62,7 +66,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	flags.SetOutput(stderr)
 	var (
 		format   = flags.String("format", "json", "what to print: json, markdown or text")
-		as       = flags.String("as", "", "read every input as html, md, txt, epub, csv, tsv, ipynb, json or yaml (default: by extension, else by content)")
+		as       = flags.String("as", "", "read every input as html, md, txt, epub, csv, tsv, ipynb, json, yaml, mht, srt or vtt (default: by extension, else by content)")
 		delim    = flags.String("delimiter", "", "the delimiter of csv and tsv input: one character, or \\t or tab for tab (default: a sep= first line, else tab for tsv, else sniffed for csv); a sep= first line overrides it")
 		noQuotes = flags.Bool("no-quotes", false, "read csv and tsv input with no quoting: a quote is a character like any other, and fields and rows end only at the delimiter and line ends")
 		header   = flags.Bool("header", false, "the first row of csv and tsv input is a header row, as the MIME parameter header=present declares")
@@ -108,9 +112,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return fail("unknown format %q: json, markdown or text", *format)
 	}
 	switch *as {
-	case "", "html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml":
+	case "", "html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml", "mht", "srt", "vtt":
 	default:
-		return fail("unknown value %q for -as: html, md, txt, epub, csv, tsv, ipynb, json or yaml", *as)
+		return fail("unknown value %q for -as: html, md, txt, epub, csv, tsv, ipynb, json, yaml, mht, srt or vtt", *as)
 	}
 	var delimiter rune
 	switch *delim {
@@ -150,17 +154,25 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	extractor := &gofasthtml.Extractor{Format: *as, MaxDepth: *maxDepth, MaxArchiveMembers: *members, Charset: *cs,
 		Delimiter: delimiter, Header: *header, NoQuotes: *noQuotes}
-	// A document an EPUB holds besides its chapters is read too if it is
-	// one of the formats of this library, decided by its name and content.
+	// A document an EPUB holds besides its chapters, or an MHTML file
+	// besides its page (a frame), is read too if it is one of the formats
+	// of this library, by its media type; the charset parameter of a text
+	// type is the transport encoding.
 	epubs := &gofasthtml.Extractor{MaxDepth: *maxDepth, MaxArchiveMembers: *members}
-	opts.Child = func(ctx context.Context, name, mime string, r io.ReaderAt, size int64, o *gofastcore.Options) (*gofastcore.Document, error) {
-		switch mime {
+	opts.Child = func(ctx context.Context, name, mediatype string, r io.ReaderAt, size int64, o *gofastcore.Options) (*gofastcore.Document, error) {
+		mt, params, err := mime.ParseMediaType(mediatype)
+		if err != nil {
+			mt, _, _ = strings.Cut(strings.ToLower(mediatype), ";")
+			mt = strings.TrimSpace(mt)
+		}
+		cs := params["charset"]
+		switch mt {
 		case "application/xhtml+xml", "text/html":
-			return (&gofasthtml.Extractor{Format: "html", MaxDepth: *maxDepth}).Extract(ctx, r, size, o)
+			return (&gofasthtml.Extractor{Format: "html", MaxDepth: *maxDepth, Charset: cs}).Extract(ctx, r, size, o)
 		case "text/markdown":
-			return (&gofasthtml.Extractor{Format: "md", MaxDepth: *maxDepth}).Extract(ctx, r, size, o)
+			return (&gofasthtml.Extractor{Format: "md", MaxDepth: *maxDepth, Charset: cs}).Extract(ctx, r, size, o)
 		case "text/plain":
-			return (&gofasthtml.Extractor{Format: "txt"}).Extract(ctx, r, size, o)
+			return (&gofasthtml.Extractor{Format: "txt", Charset: cs}).Extract(ctx, r, size, o)
 		case "application/epub+zip":
 			return epubs.Extract(ctx, r, size, o)
 		}
