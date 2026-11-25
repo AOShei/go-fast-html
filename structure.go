@@ -22,10 +22,12 @@ import (
 // first member (Attrs["path_end"] that of its last).
 //
 // In an array that is split, a run of two or more records (objects whose
-// members are all scalars) is a table: a header row of their keys and a
-// row per record, a cell holding the value as written (a string in its
-// quotes, its escapes decoded). A top-level array of records is a table
-// whatever its length.
+// members are all scalars, no key twice, in YAML with no anchor or tag)
+// is a table: a header row of their keys and a row per record, a cell
+// holding the value as written (a string in its quotes, its escapes
+// decoded). A top-level array of records is a table whatever its length.
+// The text before a table that is in no block (a key line, comments) is
+// a code block before it; a comment between two records ends the run.
 const (
 	dataUnitBytes = 4 << 10
 	// AttrPathEnd is the path of a block's last member when it holds

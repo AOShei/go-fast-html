@@ -14,15 +14,27 @@
   more objects whose values are all scalars is a table: a header row of
   their keys, a row per record with its location and path, a cell the
   value as written (strings in their quotes, escapes decoded). A
-  top-level array of records is a table at any length.
+  top-level array of records is a table at any length. The key line and
+  the comments before a table are a `code` block of their own at the
+  container's path; a comment between two records ends the run there; a
+  comment after a split container's last member is kept in a block. An
+  object with a key twice is not a record, nor a YAML mapping with an
+  anchor or a tag; a YAML cell keeps its anchor and tag as written
+  (`&who "Ann"`). Header and cells have ligatures written as letters.
+  Long lines (minified JSON) and deep paths cost time and memory linear
+  in the input.
 - **JSON Lines** (`.jsonl`, `.ndjson`, `.jsonlines`), and a `.json`
   holding several values, is a sequence of values; a line that is not
-  JSON is a block as written. JSON with comments and trailing commas
+  JSON is a block as written; in a file named as JSON Lines, that is its
+  one line, and the next line is read as a value. JSON with comments and
+  trailing commas
   (`.jsonc`, `tsconfig.json`) is read.
 - **YAML is parsed** with a YAML 1.2 parser of the library's own
   (`internal/yaml`), which passes all 402 cases of the YAML test suite.
   Text that is not JSON or YAML is read as lines as before, with
-  `Extra["json.syntax_error"]` or `["yaml.syntax_error"]`. JSON whose
+  `Extra["json.syntax_error"]` or `["yaml.syntax_error"]`. Nesting
+  deeper than 512 is read as lines with `limit.exceeded` and no syntax
+  error; text cut by the decode budget has no syntax error. JSON whose
   encoding is not certain is read as UTF-8 (RFC 8259) instead of being
   refused.
 - **Markdown front matter** (YAML between `---` lines, TOML between
@@ -31,8 +43,12 @@
   go to the metadata (title, authors, description, keywords and tags,
   language, dates) and to `Extra["front_matter.<key>"]`. Front matter
   that is not YAML but is `key: value` lines (Cursor's rules) is read
-  line by line, with `input.repaired`. `Detect` reads `.mdc`, `.qmd`
-  and `.rmd` as Markdown.
+  line by line, with `input.repaired`. A YAML null is no value; the keys
+  of a TOML array of tables are not read; metadata values have ligatures
+  written as letters. A list joined into one value is cut at 64 KiB;
+  values whose key path is over 1,024 bytes are left out; authors and
+  keywords stop at 256; each with `limit.exceeded`. `Detect` reads
+  `.mdc`, `.qmd` and `.rmd` as Markdown.
 - Corpus: 240 new public files (JSON, JSON Lines, YAML, Markdown with
   front matter: OpenAPI, Kubernetes, Helm, GitHub workflows,
   rails-i18n, Anthropic skills, Copilot and Cursor rules, MDN in English
