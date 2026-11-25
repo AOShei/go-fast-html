@@ -35,6 +35,9 @@ type mpart struct {
 	resolved  string // Content-Location resolved against the base, without fragment
 	id        string // Content-ID without its angle brackets
 	body      []byte // still in its transfer encoding
+
+	decoded    []byte // body decoded, once it has been
+	overBudget bool   // decoding it would pass the decode budget
 }
 
 // ref is how the part is named: its location, else its Content-ID.
@@ -94,7 +97,7 @@ func (a *mhtmlArchive) split(body []byte, boundary string, depth, maxParts int) 
 			return true
 		}
 		ph, pat, pprob := mimepart.ParseHeader(raw, maxMIMEHeader)
-		a.headerCut = a.headerCut || pprob.Truncated
+		a.headerCut = a.headerCut || pprob.Truncated || pprob.TooMany
 		p := newPart(ph, raw[pat:])
 		if strings.HasPrefix(p.mediatype, "multipart/") && p.params["boundary"] != "" {
 			if depth+1 >= maxMIMEDepth {
@@ -136,6 +139,11 @@ func (a *mhtmlArchive) find(ref string) (int, bool) {
 
 // resolve resolves an address against the base, without its fragment.
 func (a *mhtmlArchive) resolve(ref string) string {
+	ref = windowsPath(ref)
+	if a.base != nil && a.base.Scheme == "file" {
+		// Internet Explorer writes Windows paths, with backslashes.
+		ref = strings.ReplaceAll(ref, "\\", "/")
+	}
 	u, err := url.Parse(ref)
 	if err != nil {
 		return ref
@@ -147,27 +155,59 @@ func (a *mhtmlArchive) resolve(ref string) string {
 	return u.String()
 }
 
+// windowsPath turns a Windows path with a drive letter ("C:\\dir\\a.htm"),
+// as Internet Explorer writes locations, into a file URL
+// ("file:///C:/dir/a.htm"); anything else is returned as it is.
+func windowsPath(s string) string {
+	if len(s) >= 3 && (s[0]|0x20 >= 'a' && s[0]|0x20 <= 'z') && s[1] == ':' && (s[2] == '\\' || s[2] == '/') {
+		return "file:///" + strings.ReplaceAll(s, "\\", "/")
+	}
+	return s
+}
+
 // data decodes a part's body from its transfer encoding, within the
 // decode budget. ok is false past the budget.
 func (a *mhtmlArchive) data(p *mpart) ([]byte, bool) {
+	if p.decoded != nil || p.overBudget {
+		return p.decoded, !p.overBudget
+	}
 	var out []byte
 	switch p.cte {
-	case "base64":
-		out = mimepart.Base64(p.body)
-		if mimepart.Base64Bad(p.body) {
-			a.repaired("base64 with characters outside its alphabet; they were skipped")
+	case "base64", "quoted-printable":
+		// Decoded once, and only when the budget can hold it: base64
+		// gives at most three quarters of its length, quoted-printable
+		// at most its length.
+		most := int64(len(p.body))
+		if p.cte == "base64" {
+			most = most/4*3 + 3
 		}
-	case "quoted-printable":
-		out = mimepart.QuotedPrintable(p.body)
+		if a.decode.Left() < most {
+			p.overBudget = true
+			return nil, false
+		}
+		if p.cte == "base64" {
+			out = mimepart.Base64(p.body)
+			if mimepart.Base64Bad(p.body) {
+				a.repaired("base64 with characters outside its alphabet; they were skipped")
+			}
+		} else {
+			out = mimepart.QuotedPrintable(p.body)
+		}
+		if !a.decode.Take(int64(len(out))) {
+			p.overBudget = true
+			return nil, false
+		}
 	case "", "7bit", "8bit", "binary":
+		// Nothing is decoded: the bytes are the file's.
 		out = p.body
 	default:
 		a.repaired("parts declare a transfer encoding that is not base64, quoted-printable, 7bit, 8bit or binary; their bytes were taken as they are")
 		out = p.body
 	}
-	if !a.decode.Take(int64(len(out))) {
-		return nil, false
+	if out == nil {
+		out = []byte{}
 	}
+	p.decoded = out
 	return out, true
 }
 
@@ -200,7 +240,22 @@ func isMHTML(src []byte) bool {
 	if _, ok := h.Get("Snapshot-Content-Location"); ok {
 		return true
 	}
-	return strings.HasPrefix(strings.ToLower(fieldValue(h, "From")), "<saved by ")
+	_, ok := savedBy(fieldValue(h, "From"))
+	return ok
+}
+
+// savedBy returns the program a From field "<Saved by X>" or "Saved by
+// X" (quoted, as Internet Explorer writes it) names, and whether it is
+// one.
+func savedBy(from string) (string, bool) {
+	from = strings.TrimSpace(from)
+	if len(from) >= 2 && (from[0] == '<' && from[len(from)-1] == '>' || from[0] == '"' && from[len(from)-1] == '"') {
+		from = from[1 : len(from)-1]
+	}
+	if len(from) <= 9 || !strings.EqualFold(from[:9], "saved by ") {
+		return "", false
+	}
+	return strings.TrimSpace(from[9:]), true
 }
 
 var wordDecoder = &mime.WordDecoder{CharsetReader: func(label string, r io.Reader) (io.Reader, error) {
@@ -238,6 +293,10 @@ func headerText(v string) string {
 func (e *Extractor) mhtml(ctx context.Context, doc *gofastcore.Document, src []byte, opts *gofastcore.Options,
 	text *gofastcore.TextBudget, decode *gofastcore.DecodeBudget) (*gofastcore.Document, error) {
 	h, at, prob := mimepart.ParseHeader(src, maxMIMEHeader)
+	if prob.TooMany {
+		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("the file's header section has more than %d fields; the rest were not read", mimepart.MaxFields))
+	}
 	if prob.Truncated {
 		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			fmt.Sprintf("the file's header section is longer than %d bytes; the rest of it was not read", maxMIMEHeader))
@@ -260,7 +319,7 @@ func (e *Extractor) mhtml(ctx context.Context, doc *gofastcore.Document, src []b
 		}
 		if a.headerCut {
 			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-				fmt.Sprintf("a part's header section is longer than %d bytes; the rest of it was not read", maxMIMEHeader))
+				fmt.Sprintf("a part's header section is longer than %d bytes or has more than %d fields; the rest of it was not read", maxMIMEHeader, mimepart.MaxFields))
 		}
 		if a.tooDeep {
 			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
@@ -295,12 +354,20 @@ func (e *Extractor) mhtml(ctx context.Context, doc *gofastcore.Document, src []b
 	}
 
 	// Addresses are resolved against the page's location.
+	// The page's location, resolved against the snapshot's when it is
+	// relative.
 	baseRef := fieldValue(h, "Snapshot-Content-Location")
+	if u, err := url.Parse(windowsPath(baseRef)); err == nil && baseRef != "" {
+		a.base = u
+	}
 	if root >= 0 && a.parts[root].location != "" {
 		baseRef = a.parts[root].location
-	}
-	if u, err := url.Parse(baseRef); err == nil && baseRef != "" {
-		a.base = u
+		if a.base != nil {
+			baseRef = a.resolve(baseRef)
+		}
+		if u, err := url.Parse(windowsPath(baseRef)); err == nil {
+			a.base = u
+		}
 	}
 	for i := range a.parts {
 		p := &a.parts[i]
@@ -373,7 +440,9 @@ func (e *Extractor) mhtml(ctx context.Context, doc *gofastcore.Document, src []b
 				xhtml: rp.mediatype == "application/xhtml+xml",
 				image: func(ref string) (blocks.ImageRef, bool) {
 					i, ok := a.find(ref)
-					if !ok || i == root {
+					if !ok || i == root || !strings.HasPrefix(a.parts[i].mediatype, "image/") {
+						// A frame or a script named by an <img> stays an
+						// embedded document.
 						return blocks.ImageRef{}, false
 					}
 					shown[i] = true
@@ -415,6 +484,9 @@ func (e *Extractor) mhtml(ctx context.Context, doc *gofastcore.Document, src []b
 		return nil, err
 	}
 	e.mhtmlRest(ctx, a, shown, opts, text, doc, t)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	for msg, n := range a.repairs {
 		if n > 1 {
 			msg = fmt.Sprintf("%s (%d times)", msg, n)
@@ -477,9 +549,8 @@ func mhtmlMetadata(md *gofastcore.Metadata, h mimepart.Header, location string) 
 			md.Created = t
 		}
 	}
-	if from := fieldValue(h, "From"); md.Application == "" && len(from) > 11 &&
-		strings.HasPrefix(strings.ToLower(from), "<saved by ") && strings.HasSuffix(from, ">") {
-		md.Application = cleanLine(from[10 : len(from)-1])
+	if app, ok := savedBy(fieldValue(h, "From")); md.Application == "" && ok && app != "" {
+		md.Application = cleanLine(app)
 	}
 	for _, f := range h {
 		key := strings.ToLower(f.Name)

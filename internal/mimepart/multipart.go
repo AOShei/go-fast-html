@@ -34,12 +34,15 @@ func SplitAnywhere(body []byte, boundary string, maxParts int) Multipart {
 }
 
 func split(body []byte, boundary string, maxParts int, anywhere bool) Multipart {
+	if anywhere {
+		return splitAnywhere(body, boundary, maxParts)
+	}
 	var m Multipart
 	delim := []byte("--" + boundary)
 	start := -1 // where the current part begins; -1 while in the preamble
 	pos := 0
 	for pos <= len(body) {
-		at := nextDelimiter(body, delim, pos, anywhere)
+		at := nextDelimiter(body, delim, pos)
 		if at < 0 {
 			break
 		}
@@ -97,17 +100,68 @@ func (m *Multipart) add(part []byte, maxParts int) bool {
 
 // nextDelimiter returns the offset of the next occurrence of delim at the
 // start of a line at or after pos, or -1.
-func nextDelimiter(body, delim []byte, pos int, anywhere bool) int {
+func nextDelimiter(body, delim []byte, pos int) int {
 	for pos < len(body) {
 		i := bytes.Index(body[pos:], delim)
 		if i < 0 {
 			return -1
 		}
 		at := pos + i
-		if anywhere || at == 0 || body[at-1] == '\n' {
+		if at == 0 || body[at-1] == '\n' {
 			return at
 		}
 		pos = at + 1
 	}
 	return -1
+}
+
+// splitAnywhere is SplitAnywhere. Since the rest of a boundary line must
+// be white space, a delimiter that is not at the start of a line can only
+// end where the line's text ends: each line is looked at once, at its
+// end, so the time is linear in the body whatever it holds.
+func splitAnywhere(body []byte, boundary string, maxParts int) Multipart {
+	var m Multipart
+	delim := []byte("--" + boundary)
+	start := -1 // where the current part begins; -1 while in the preamble
+	for ls := 0; ls < len(body); {
+		end := lineEnd(body, ls) // after the line's break
+		te := ls + len(bytes.TrimRight(body[ls:end], " \t\r\n"))
+		at, closing := -1, false
+		switch {
+		case te-ls >= len(delim)+2 && bytes.HasSuffix(body[ls:te], []byte("--")) && bytes.Equal(body[te-2-len(delim):te-2], delim):
+			at, closing = te-2-len(delim), true
+		case te-ls >= len(delim) && bytes.Equal(body[te-len(delim):te], delim):
+			at = te - len(delim)
+		}
+		if at < 0 {
+			ls = end
+			continue
+		}
+		// The line break before the boundary belongs to the boundary.
+		contentEnd := at
+		if contentEnd > 0 && body[contentEnd-1] == '\n' {
+			contentEnd--
+			if contentEnd > 0 && body[contentEnd-1] == '\r' {
+				contentEnd--
+			}
+		}
+		if start < 0 {
+			m.Preamble = body[:max(contentEnd, 0)]
+		} else if !m.add(body[start:max(contentEnd, start)], maxParts) {
+			return m
+		}
+		if closing {
+			m.Closed = true
+			m.Epilogue = body[end:]
+			return m
+		}
+		start = end
+		ls = end
+	}
+	if start < 0 {
+		m.Preamble = body
+		return m
+	}
+	m.add(body[start:], maxParts)
+	return m
 }

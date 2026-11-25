@@ -131,7 +131,7 @@ func (w *walker) image(n *dom.Node) {
 		default:
 			w.res.ImageData++
 		}
-	} else if ref, ok := w.resolve(src); ok {
+	} else if ref, ok := w.resolveImage(n, src); ok {
 		img.ID, img.MIME = ref.ID, ref.MIME
 		if w.cfg.Images == gofastcore.ImagesData {
 			if d, ok := ref.Data(); ok {
@@ -158,6 +158,50 @@ type ImageRef struct {
 	// Data reads the image's bytes, within the decode budget.
 	Data func() ([]byte, bool)
 }
+
+// resolveImage resolves an img's address in the container, and when its
+// src is not there, the candidates of its srcset and of the srcset of
+// the <source> elements of a <picture> it stands in, in order: a page
+// saved as MHTML holds the candidate the browser showed, which need not
+// be the src.
+func (w *walker) resolveImage(n *dom.Node, src string) (ImageRef, bool) {
+	if ref, ok := w.resolve(src); ok || w.cfg.Image == nil {
+		return ref, ok
+	}
+	try := func(e *dom.Node) (ImageRef, bool) {
+		set, _ := e.Attr("srcset")
+		for i, c := range strings.SplitN(set, ",", maxSrcset+1) {
+			if i >= maxSrcset {
+				break
+			}
+			f := strings.Fields(c)
+			if len(f) == 0 {
+				continue
+			}
+			if ref, ok := w.resolve(f[0]); ok {
+				return ref, true
+			}
+		}
+		return ImageRef{}, false
+	}
+	if ref, ok := try(n); ok {
+		return ref, true
+	}
+	if p := n.Parent; p != nil && p.Name == "picture" {
+		for c, k := p.FirstChild, 0; c != nil && k < maxSrcset; c, k = c.Next, k+1 {
+			if c.Name == "source" {
+				if ref, ok := try(c); ok {
+					return ref, true
+				}
+			}
+		}
+	}
+	return ImageRef{}, false
+}
+
+// maxSrcset bounds the srcset candidates, and the children of a
+// <picture>, looked at for one image.
+const maxSrcset = 64
 
 func (w *walker) resolve(src string) (ImageRef, bool) {
 	if w.cfg.Image == nil || src == "" {
