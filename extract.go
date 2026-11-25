@@ -390,9 +390,14 @@ func (e *Extractor) Extract(ctx context.Context, r io.ReaderAt, size int64, opts
 		doc.Metadata = res.Meta
 	}
 	if fm.lang != "" {
-		if cut := applyFrontMatter(&doc.Metadata, fm, &t.controls); cut > 0 {
+		cut, listLeft := applyFrontMatter(&doc.Metadata, fm, &t.controls)
+		if cut > 0 {
 			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-				fmt.Sprintf("%s of the front matter cut in the metadata (whole in its block): values at %d bytes, key paths at %d", count(cut, "value or key", "values or keys"), MaxMetaValue, maxFrontMatterKey))
+				fmt.Sprintf("%s of the front matter cut or left out in the metadata (whole in its block): values cut at %d bytes, values whose key path is longer than %d bytes left out", count(cut, "value", "values"), MaxMetaValue, maxFrontMatterKey))
+		}
+		if listLeft > 0 {
+			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+				fmt.Sprintf("%s of the front matter left out of the metadata past %d (whole in its block)", count(listLeft, "author or keyword", "authors and keywords"), blocks.MaxMetaList))
 		}
 		if fm.notYAML != "" {
 			doc.Warn(gofastcore.SeverityInfo, gofastcore.WarnInputRepaired,

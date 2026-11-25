@@ -140,3 +140,23 @@ func TestFrontMatterBounds(t *testing.T) {
 		t.Errorf("long title: %d", len(doc.Metadata.Title))
 	}
 }
+
+// Nulls are no value; keys after an array of tables are read again from
+// the next [table]; a key path past maxFrontMatterKey is left out.
+func TestFrontMatterNullsTablesLongPaths(t *testing.T) {
+	doc := dataDoc(t, "n.md", "---\ntags: [a, ~, null, b]\nother: NULL\nkept: \"null\"\n---\nBody\n", nil)
+	md := doc.Metadata
+	if strings.Join(md.Keywords, "|") != "a|b" || md.Extra["front_matter.other"] != "" || md.Extra["front_matter.kept"] != "null" {
+		t.Errorf("nulls: %+v", md)
+	}
+	doc = dataDoc(t, "t.md", "+++\n[[resources]]\nsrc = \"x\"\n[params]\nsrc = \"y\"\n+++\nBody\n", nil)
+	if md := doc.Metadata; md.Extra["front_matter.src"] != "" || md.Extra["front_matter.params.src"] != "y" {
+		t.Errorf("toml: %+v", md.Extra)
+	}
+	long := strings.Repeat("k", maxFrontMatterKey)
+	doc = dataDoc(t, "l.md", "---\n"+long+": 1\n"+long+":\n  a: 2\n---\nBody\n", nil)
+	if md := doc.Metadata; md.Extra["front_matter."+long] != "1" || len(md.Extra) != 1 ||
+		len(csvWarnings(doc, gofastcore.WarnLimitExceeded)) != 1 {
+		t.Errorf("long paths: %d extra, %+v", len(md.Extra), doc.Warnings)
+	}
+}
