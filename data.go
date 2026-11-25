@@ -51,6 +51,30 @@ func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src 
 				int64(len(src))-m.Source(len(decoded))))
 	}
 
+	// JSON is cut by its structure; text that is not JSON is read as lines.
+	if format == "json" {
+		s, ok, err := e.jsonStructure(ctx, decoded, m, opts.Name, &part, text)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			if s.spent {
+				part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+					textCutMessage(part.Kind)+" ("+count(dataLinesFrom(decoded, s.lastEnd), "line", "lines")+" not read)")
+			}
+			if s.controls > 0 {
+				part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(s.controls, "the text"))
+			}
+			if len(part.Blocks) == 0 && !cut && !s.spent {
+				part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")
+			}
+			part.Finish()
+			doc.Parts = append(doc.Parts, part)
+			t.finish(doc)
+			return doc, nil
+		}
+	}
+
 	var (
 		pending   []dataLine // the lines of the block being made
 		size      int        // their bytes

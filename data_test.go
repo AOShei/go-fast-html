@@ -57,7 +57,7 @@ func TestDataJSON(t *testing.T) {
 	if b[0].Text != want {
 		t.Errorf("text:\n%q\nwant\n%q", b[0].Text, want)
 	}
-	if b[0].Loc.Offset != 1 || b[0].Loc.Length != int64(len(src)-2) {
+	if b[0].Loc.Offset != 1 || b[0].Loc.Length != int64(strings.LastIndex(src, "}")) {
 		t.Errorf("loc: %+v (input %d bytes)", b[0].Loc, len(src))
 	}
 	// Invalid JSON is text like any other.
@@ -92,6 +92,8 @@ func TestDataYAMLDocuments(t *testing.T) {
 }
 
 func TestDataSplit(t *testing.T) {
+	// JSON Lines of records: a table, in pieces of csvRowsPerBlock rows,
+	// each with the header row.
 	var b strings.Builder
 	for i := range 2500 {
 		fmt.Fprintf(&b, "{\"n\": %d}\n", i)
@@ -101,15 +103,29 @@ func TestDataSplit(t *testing.T) {
 	if len(blocks) != 3 || !blocks[1].Continued || !blocks[2].Continued || blocks[0].Continued {
 		t.Fatalf("%d blocks", len(blocks))
 	}
-	joined := blocks[0].Text + "\n" + blocks[1].Text + "\n" + blocks[2].Text + "\n"
-	if joined != b.String() || strings.Count(blocks[0].Text, "\n") != dataBlockLines-1 {
-		t.Error("pieces do not join to the input")
+	rows := 0
+	for _, bl := range blocks {
+		tb := bl.Table
+		if bl.Kind != gofastcore.KindTable || tb.HeaderRows != 1 || tb.Rows[0][0] != "n" || len(tb.RowLocs) != len(tb.Rows) {
+			t.Fatalf("block: %+v", bl)
+		}
+		for i, r := range tb.Rows[1:] {
+			loc := tb.RowLocs[i+1]
+			if r[0] != fmt.Sprint(rows) || loc.Anchor != fmt.Sprintf("[%d]", rows) || b.String()[loc.Offset:loc.Offset+loc.Length] != fmt.Sprintf("{\"n\": %d}", rows) {
+				t.Fatalf("row %d: %q %+v", rows, r, loc)
+			}
+			rows++
+		}
 	}
-	// A line is never cut: one longer than a piece is a block of its own.
+	if rows != 2500 {
+		t.Errorf("%d rows", rows)
+	}
+	// A value is never cut: one longer than a block is a block of its own.
 	long := strings.Repeat("\u00e9", dataBlockBytes)
-	doc = dataDoc(t, "l.json", "[\n\""+long+"\"\n]", nil)
-	if bl := doc.Parts[0].Blocks; len(bl) != 3 || bl[0].Text != "[" || bl[1].Text != "\""+long+"\"" || bl[2].Text != "]" || !bl[1].Continued || !bl[2].Continued {
-		t.Errorf("long line: %d blocks", len(bl))
+	doc = dataDoc(t, "l.json", "[\n1,\n\""+long+"\",\n2\n]", nil)
+	if bl := doc.Parts[0].Blocks; len(bl) != 3 || bl[0].Text != "1" || bl[1].Text != "\""+long+"\"" || bl[2].Text != "2" ||
+		bl[1].Loc.Anchor != "[1]" {
+		t.Errorf("long value: %d blocks", len(bl))
 	}
 }
 
