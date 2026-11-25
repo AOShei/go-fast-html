@@ -17,11 +17,19 @@
   byte order mark is decoded for these two formats; text of no certain
   encoding is refused with `ErrEncodingUnknown`, as plain text is. See
   the README's "Subtitles".
+- Line ends CR LF, LF, CR and CR CR LF; in WebVTT only an empty line ends
+  a block or the header; U+FEFF around a SubRip cue number is ignored.
+  WebVTT tags nest up to `Extractor.MaxDepth`, deeper ones ignored with
+  `limit.exceeded`. Reading is linear in the input: unclosed tags and
+  override codes, long headers, repeated header keys and many voices
+  were quadratic before release.
 - Of the 57 SubRip and 83 WebVTT files of the corpus's dev set, 5 SubRip
   files in code pages not certain from their bytes (Arabic, Hebrew, Thai,
-  Hungarian, Polish) are refused with `ErrEncodingUnknown`; the others
-  read with no error and pass `Validate`, with every block's words in the input at its
-  `Loc` and one cue per line with `-->` (`TestSubtitleCorpus`).
+  Hungarian, Polish) are refused with `ErrEncodingUnknown`; the other 52
+  give 4,859 cues, the WebVTT files 134 cues, 6 notes and 10 stored
+  blocks. All read files pass `Validate`, with every block's words in the
+  input at its `Loc` and one cue per line with `-->`
+  (`TestSubtitleCorpus`).
 
 ## v0.4.4 (2026-11-24)
 
