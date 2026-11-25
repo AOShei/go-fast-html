@@ -320,6 +320,11 @@ func vttMetadata(doc *gofastcore.Document, part *gofastcore.Part, h *subtitle.He
 	t.controls += h.Controls
 	cuts, left := 0, 0
 	full := map[string]bool{} // keys whose value was cut: nothing more is joined
+	// The values of a key are gathered in a buffer and written once, so
+	// that a key repeated on every line costs the line, not the value so
+	// far.
+	vals := map[string]*strings.Builder{}
+	var order []string
 	set := func(k, v string) {
 		if v == "" {
 			return
@@ -328,28 +333,40 @@ func vttMetadata(doc *gofastcore.Document, part *gofastcore.Part, h *subtitle.He
 			cuts++
 			return
 		}
-		if doc.Metadata.Extra == nil {
-			doc.Metadata.Extra = map[string]string{}
+		b, ok := vals[k]
+		if !ok {
+			if len(vals) >= blocks.MaxMetaList {
+				left++
+				return
+			}
+			b = &strings.Builder{}
+			vals[k] = b
+			order = append(order, k)
+		} else {
+			b.WriteByte('\n')
 		}
-		old, ok := doc.Metadata.Extra[k]
-		if !ok && len(doc.Metadata.Extra) >= blocks.MaxMetaList {
-			left++
-			return
-		}
-		if ok {
-			v = old + "\n" + v[:min(len(v), blocks.MaxMeta)]
-		}
-		if len(v) > blocks.MaxMeta {
+		b.WriteString(v[:min(len(v), blocks.MaxMeta+1)])
+		if b.Len() > blocks.MaxMeta {
 			cuts++
 			full[k] = true
-			n := blocks.MaxMeta
-			for n > 0 && !utf8.RuneStart(v[n]) {
-				n--
-			}
-			v = v[:n]
 		}
-		doc.Metadata.Extra[k] = v
 	}
+	defer func() {
+		for _, k := range order {
+			v := vals[k].String()
+			if len(v) > blocks.MaxMeta {
+				n := blocks.MaxMeta
+				for n > 0 && !utf8.RuneStart(v[n]) {
+					n--
+				}
+				v = v[:n]
+			}
+			if doc.Metadata.Extra == nil {
+				doc.Metadata.Extra = map[string]string{}
+			}
+			doc.Metadata.Extra[k] = v
+		}
+	}()
 	set("vtt.header", h.Text)
 	for _, f := range h.Fields {
 		k := strings.ToLower(f.Key)
