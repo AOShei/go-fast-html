@@ -25,12 +25,13 @@ type dataLine struct {
 	controls   int    // control characters dropped
 }
 
-// dataText reads a JSON or YAML file into one part of kind body: its text,
-// verbatim but for control characters, in code blocks whose language is
-// the format. Nothing is parsed. A YAML file of several documents has a
-// block (or a run of pieces) for each; the blank lines at the start and
-// end of a document are left out, and the pieces of a document joined
-// with line feeds give it back.
+// dataText reads a JSON or YAML file into one part of kind body: by its
+// structure (jsonStructure, yamlStructure), or, when it is neither, as
+// lines: its text, verbatim but for control characters, in code blocks
+// whose language is the format. Read as lines, a YAML file of several
+// documents has a block (or a run of pieces) for each; the blank lines at
+// the start and end of a document are left out, and the pieces of a
+// document joined with line feeds give it back.
 func (e *Extractor) dataText(ctx context.Context, doc *gofastcore.Document, src []byte, format string, opts *gofastcore.Options,
 	text *gofastcore.TextBudget, decode *gofastcore.DecodeBudget) (*gofastcore.Document, error) {
 	part := gofastcore.Part{Kind: gofastcore.PartBody, Number: 1}

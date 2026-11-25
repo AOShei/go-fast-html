@@ -94,7 +94,7 @@ const (
 )
 
 // Extractor extracts HTML, Markdown, plain text, EPUB, comma- and
-// tab-separated values, Jupyter notebooks, JSON and YAML as text, and web
+// tab-separated values, Jupyter notebooks, JSON and YAML, and web
 // pages saved as one file (MHTML). The
 // zero value is ready to use and safe for concurrent use.
 type Extractor struct {

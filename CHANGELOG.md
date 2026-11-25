@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- **JSON and YAML are cut along their structure**, no longer every 1,000
+  lines. A top-level value of at most 4 KiB is one block; a longer one is
+  split into its members, packed into blocks of at most 4 KiB, a longer
+  member split in turn, so that no value is cut. A block is the text as
+  written, with the comments around its members; `Loc.Anchor` is the
+  path of its first member (`spec.containers[0]`), `Attrs["path_end"]`
+  that of its last; in a YAML file of several documents,
+  `Attrs["document"]`. See the README's "JSON and YAML".
+- **Records are tables.** In a split array or sequence, a run of two or
+  more objects whose values are all scalars is a table: a header row of
+  their keys, a row per record with its location and path, a cell the
+  value as written (strings in their quotes, escapes decoded). A
+  top-level array of records is a table at any length.
+- **JSON Lines** (`.jsonl`, `.ndjson`, `.jsonlines`), and a `.json`
+  holding several values, is a sequence of values; a line that is not
+  JSON is a block as written. JSON with comments and trailing commas
+  (`.jsonc`, `tsconfig.json`) is read.
+- **YAML is parsed** with a YAML 1.2 parser of the library's own
+  (`internal/yaml`), which passes all 402 cases of the YAML test suite.
+  Text that is not JSON or YAML is read as lines as before, with
+  `Extra["json.syntax_error"]` or `["yaml.syntax_error"]`. JSON whose
+  encoding is not certain is read as UTF-8 (RFC 8259) instead of being
+  refused.
+- **Markdown front matter** (YAML between `---` lines, TOML between
+  `+++`) is no longer read as a thematic break and a heading: it is the
+  first block, a code block with `Attrs["front_matter"]`, and its values
+  go to the metadata (title, authors, description, keywords and tags,
+  language, dates) and to `Extra["front_matter.<key>"]`. Front matter
+  that is not YAML but is `key: value` lines (Cursor's rules) is read
+  line by line, with `input.repaired`. `Detect` reads `.mdc`, `.qmd`
+  and `.rmd` as Markdown.
+- Corpus: 240 new public files (JSON, JSON Lines, YAML, Markdown with
+  front matter: OpenAPI, Kubernetes, Helm, GitHub workflows,
+  rails-i18n, Anthropic skills, Copilot and Cursor rules, MDN in English
+  and French, Hugo, Jekyll). No error, Validate failure or panic; every
+  code block's text is the input at its location.
+
+## Unreleased
+
 - **Web pages saved as one file (MHTML, `.mht`, `.mhtml`)**, format `mht`, as Chrome, Edge, Internet Explorer, UnMHT and WebKit save them. The page is read as HTML into the body, with the images it shows taken from the file; images it does not show are stored manifest items, frames and other files embedded documents, style sheets and fonts not listed. The file's header adds the title, the date saved, the saving program and the page's address to the metadata. Images a page shows through `srcset` or `<picture>` are found in the file. `Detect` knows the extensions and the header of a saved page. The command reads `.mht` and `.mhtml` files in a directory, takes `-as mht`, and reads an HTML child with the charset of its media type. Over the public corpus's 40 MHTML files (Chromium's test files and pages saved by Chrome): no error, no Validate failure.
 - **Subtitles and captions: SubRip (`srt`) and WebVTT (`vtt`).** One part
   of kind `body`, a `paragraph` per cue in file order: its text as a viewer
