@@ -229,6 +229,7 @@ func SRT(ctx context.Context, src []byte, yield func(*Item) bool) error {
 		}
 		if l.blank() {
 			blank = hasText
+			ctrl += l.controls // counted with the next item
 			continue
 		}
 		if cur == nil {
@@ -309,16 +310,17 @@ func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error
 		}
 	}
 	var body []byte
+	ctrl := 0 // of blank lines, counted with the next item
 	for {
 		l, ok := r.next()
 		if !ok {
 			break
 		}
 		if l.blank() {
+			ctrl += l.controls
 			continue
 		}
 		it := &Item{Start: l.start, End: l.end}
-		ctrl := 0
 		var t *line
 		if l.timing() {
 			t = &l
@@ -340,6 +342,7 @@ func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error
 			for {
 				n, ok := r.next()
 				if !ok || n.blank() {
+					ctrl += n.controls
 					return
 				}
 				if n.timing() {
@@ -383,6 +386,7 @@ func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error
 					h.Regions = append(h.Regions, string(t))
 				}
 				h.Controls += ctrl
+				ctrl = 0
 				continue
 			default:
 				it.Kind = Stray
@@ -392,6 +396,7 @@ func VTT(ctx context.Context, src []byte, yield func(*Item) bool) (Header, error
 		it.Text, it.Spans, it.Cut = b.finish()
 		it.Cut = it.Cut || over
 		it.Controls = ctrl + b.controls
+		ctrl = 0
 		if !yield(it) {
 			return h, nil
 		}

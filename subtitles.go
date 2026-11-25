@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
 	"github.com/AOShei/go-fast-html/internal/blocks"
@@ -50,20 +53,37 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 	if format == "vtt" {
 		label = "" // UTF-8 by the spec: no transport encoding
 	}
-	enc := charset.SniffText(src, label)
-	if err := t.sniffed(&enc, false); err != nil {
-		return nil, err
+	var (
+		decoded []byte
+		source  func(int) int64
+		invalid int
+		cut     bool
+		encName string
+	)
+	if be, ok := utf32BOM(src); ok {
+		decoded, source, invalid, cut = decodeUTF32(src, be, max(decode.Left(), 0))
+		encName = map[bool]string{true: "utf-32be", false: "utf-32le"}[be]
+	} else {
+		enc := charset.SniffText(src, label)
+		// Text whose encoding is not certain is read as windows-1252,
+		// with text.encoding_detected, as an EPUB chapter is: a file of
+		// cues is not refused for the letters of its text.
+		if err := t.sniffed(&enc, true); err != nil {
+			return nil, err
+		}
+		var m *charset.Map
+		decoded, m, invalid, cut = charset.Decode(src, enc, max(decode.Left(), 0))
+		source, encName = m.Source, enc.Enc.String()
 	}
-	decoded, m, invalid, cut := charset.Decode(src, enc, max(decode.Left(), 0))
 	decode.Take(int64(len(decoded)))
 	if invalid > 0 {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextUnmappedGlyphs,
-			fmt.Sprintf("%d byte sequences are not valid %s and appear as U+FFFD", invalid, enc.Enc))
+			fmt.Sprintf("%d byte sequences are not valid %s and appear as U+FFFD", invalid, encName))
 	}
 	if cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			fmt.Sprintf("the limit on decoded bytes was reached; the rest of the input was not read (%d bytes)",
-				int64(len(src))-m.Source(len(decoded))))
+				int64(len(src))-source(len(decoded))))
 	}
 
 	var (
@@ -77,7 +97,7 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 		}
 		c.attrs++
 		n := maxSubtitleAttr
-		for n > 0 && !utf8RuneStart(s[n]) {
+		for n > 0 && !utf8.RuneStart(s[n]) {
 			n--
 		}
 		return s[:n]
@@ -93,9 +113,9 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 			c.controls += it.Controls
 			return true
 		}
-		off := m.Source(it.Start)
+		off := source(it.Start)
 		b := gofastcore.Block{Kind: gofastcore.KindParagraph, Text: it.Text,
-			Loc: gofastcore.Location{Offset: off, Length: m.Source(it.End) - off}}
+			Loc: gofastcore.Location{Offset: off, Length: source(it.End) - off}}
 		switch it.Kind {
 		case subtitle.Cue:
 			b.Attrs = map[string]string{"start": attr(it.Begin), "end": attr(it.Finish)}
@@ -210,7 +230,73 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 	return doc, nil
 }
 
-func utf8RuneStart(b byte) bool { return b&0xC0 != 0x80 }
+// utf32BOM reports whether src begins with a UTF-32 byte order mark, and
+// whether it is big-endian. FF FE 00 00 is read as UTF-32 little-endian,
+// not as UTF-16 beginning with U+0000.
+func utf32BOM(src []byte) (be, ok bool) {
+	switch {
+	case bytes.HasPrefix(src, []byte{0, 0, 0xFE, 0xFF}):
+		return true, true
+	case bytes.HasPrefix(src, []byte{0xFF, 0xFE, 0, 0}):
+		return false, true
+	}
+	return false, false
+}
+
+// decodeUTF32 decodes UTF-32 after its byte order mark into UTF-8, at
+// most limit bytes of it. A unit that is not a Unicode scalar value, and
+// bytes at the end too few for a unit, are U+FFFD and counted. source
+// maps an offset of the text to the input's: each character comes from
+// four bytes, so the map keeps the decoded offset of every 1024th
+// character and counts on from there.
+func decodeUTF32(src []byte, be bool, limit int64) (out []byte, source func(int) int64, invalid int, cut bool) {
+	body := src[4:]
+	var marks []int // decoded offset of characters 0, 1024, 2048, ...
+	for i := 0; i < len(body); i += 4 {
+		if (i/4)%1024 == 0 {
+			marks = append(marks, len(out))
+		}
+		r := utf8.RuneError
+		if i+4 <= len(body) {
+			u := body[i : i+4]
+			var v uint32
+			if be {
+				v = uint32(u[0])<<24 | uint32(u[1])<<16 | uint32(u[2])<<8 | uint32(u[3])
+			} else {
+				v = uint32(u[3])<<24 | uint32(u[2])<<16 | uint32(u[1])<<8 | uint32(u[0])
+			}
+			if v <= unicode.MaxRune && (v < 0xD800 || v > 0xDFFF) {
+				r = rune(v)
+			} else {
+				invalid++
+			}
+		} else {
+			invalid++
+		}
+		if int64(len(out)+utf8.RuneLen(r)) > limit {
+			cut = true
+			break
+		}
+		out = utf8.AppendRune(out, r)
+	}
+	source = func(dec int) int64 {
+		k := sort.SearchInts(marks, dec+1) - 1 // the last mark at or before dec
+		if k < 0 {
+			return 4
+		}
+		d, ch := marks[k], k*1024
+		for d < dec && d < len(out) {
+			_, n := utf8.DecodeRune(out[d:])
+			if d+n > dec {
+				break
+			}
+			d += n
+			ch++
+		}
+		return int64(4 + min(ch*4, len(body)))
+	}
+	return out, source, invalid, cut
+}
 
 // vttMetadata puts what a WebVTT header says in the document's metadata,
 // and warns on part when the signature is missing.
@@ -239,7 +325,7 @@ func vttMetadata(doc *gofastcore.Document, part *gofastcore.Part, h *subtitle.He
 		if len(v) > blocks.MaxMeta {
 			cuts++
 			n := blocks.MaxMeta
-			for n > 0 && !utf8RuneStart(v[n]) {
+			for n > 0 && !utf8.RuneStart(v[n]) {
 				n--
 			}
 			v = v[:n]

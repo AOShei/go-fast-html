@@ -246,6 +246,35 @@ func TestSubtitleEncodings(t *testing.T) {
 	if got := briefs(doc.Parts[0]); len(got) != 1 || got[0] != `paragraph "hé" @2+72 #1 {end=00:00:02.000 start=00:00:01.000}` {
 		t.Errorf("utf-16: %q", got)
 	}
+	// UTF-32, both byte orders, with a character outside the BMP.
+	for _, be := range []bool{false, true} {
+		var b []byte
+		if be {
+			b = []byte{0, 0, 0xFE, 0xFF}
+		} else {
+			b = []byte{0xFF, 0xFE, 0, 0}
+		}
+		for _, r := range "1\n00:00:01,000 --> 00:00:02,000\nx" + string(rune(0x1F600)) + "y\n" {
+			if be {
+				b = append(b, byte(r>>24), byte(r>>16), byte(r>>8), byte(r))
+			} else {
+				b = append(b, byte(r), byte(r>>8), byte(r>>16), byte(r>>24))
+			}
+		}
+		doc := subExtract(t, "srt", string(b), nil)
+		want := `paragraph "x` + string(rune(0x1F600)) + `y" @4+140 #1 {end=00:00:02.000 start=00:00:01.000}`
+		if got := briefs(doc.Parts[0]); len(got) != 1 || got[0] != want || warnCodes(doc) != "" {
+			t.Errorf("utf-32 be=%v: %q %s", be, got, warnCodes(doc))
+		}
+	}
+	// Bytes of no certain encoding: read as windows-1252, with
+	// text.encoding_detected.
+	src = "1\n00:00:01,000 --> 00:00:02,000\na\x81\x8D\x8F\x90\x9Db\n"
+	doc = subExtract(t, "srt", src, nil)
+	if ws := warnCodes(doc); !strings.Contains(ws, gofastcore.WarnTextEncodingDetected) || !strings.Contains(ws, "5 control characters") ||
+		len(doc.Parts[0].Blocks) != 1 {
+		t.Errorf("undetermined: %s", warnCodes(doc))
+	}
 	// windows-1252 given as the transport encoding.
 	src = "1\n00:00:01,000 --> 00:00:02,000\ncaf\xE9\n"
 	doc, err := (&Extractor{Format: "srt", Charset: "windows-1252"}).Extract(context.Background(), strings.NewReader(src), int64(len(src)), nil)
