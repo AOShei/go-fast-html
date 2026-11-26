@@ -13,7 +13,7 @@ import (
 // How JSON and YAML are cut by their structure.
 //
 // A document's top-level value is one block when it is at most
-// dataUnitBytes long. A longer one is split into its members (an
+// Extractor.DataBlockBytes long (dataUnitBytes by default). A longer one is split into its members (an
 // object's members, an array's elements), and consecutive members are
 // packed into blocks whose members span at most dataUnitBytes (a block
 // adds the indentation, head and comments around them); a member longer
@@ -30,7 +30,7 @@ import (
 // The text before a table that is in no block (a key line, comments) is
 // a code block before it; a comment between two records ends the run.
 const (
-	dataUnitBytes = 4 << 10
+	dataUnitBytes = DefaultDataBlockBytes
 	// AttrPathEnd is the path of a block's last member when it holds
 	// several: Loc.Anchor is the first's.
 	AttrPathEnd = "path_end"

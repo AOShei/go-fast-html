@@ -128,7 +128,7 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 	if pl.values == 0 && (!lines || len(pl.regions) == 0) {
 		return nil, pl.err, nil
 	}
-	s := &dSplitter{ctx: ctx, src: src, m: m, format: "json", limit: dataUnitBytes, text: text, part: part, head: -1,
+	s := &dSplitter{ctx: ctx, src: src, m: m, format: "json", limit: e.dataBlockBytes(), text: text, part: part, head: -1,
 		comment: jsonComment}
 	s.keyText = func(k keyRef) string {
 		if k.set {
