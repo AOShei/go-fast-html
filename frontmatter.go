@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,9 @@ type fmValue struct {
 	path  string
 	items []string
 	list  bool
+	// nulls says, item by item, which are a null (nil when none is): a
+	// null is kept as written, but is no title, author or keyword.
+	nulls []bool
 	// long: the key path is longer than maxFrontMatterKey; the value is
 	// left out of the metadata.
 	long bool
@@ -225,12 +229,12 @@ func yamlFrontMatter(content []byte) (values []fmValue, cut bool, why string) {
 			at := top.index
 			top.index = 0
 			for _, it := range top.items {
-				if it.null {
-					top.index++
-					continue
-				}
 				path, long := child(top)
-				add(fmValue{path: path, long: long, items: []string{it.v}})
+				v := fmValue{path: path, long: long, items: []string{it.v}}
+				if it.null {
+					v.nulls = []bool{true}
+				}
+				add(v)
 			}
 			top.index = at
 			top.items = nil
@@ -245,14 +249,18 @@ func yamlFrontMatter(content []byte) (values []fmValue, cut bool, why string) {
 		case yaml.MappingEnd, yaml.SequenceEnd:
 			stack = stack[:len(stack)-1]
 			if !top.mapping && top.scalar {
-				var items []string
-				for _, it := range top.items {
-					if !it.null {
-						items = append(items, it.v)
+				if len(top.items) > 0 {
+					v := fmValue{path: top.path, long: top.long, items: make([]string, len(top.items)), list: true}
+					for i, it := range top.items {
+						v.items[i] = it.v
+						if it.null {
+							if v.nulls == nil {
+								v.nulls = make([]bool, len(top.items))
+							}
+							v.nulls[i] = true
+						}
 					}
-				}
-				if len(items) > 0 {
-					add(fmValue{path: top.path, long: top.long, items: items, list: true})
+					add(v)
 				}
 			}
 			if len(stack) > 0 && stack[len(stack)-1].mapping {
@@ -263,7 +271,7 @@ func yamlFrontMatter(content []byte) (values []fmValue, cut bool, why string) {
 			if ev.Kind == yaml.Alias {
 				v = "*" + v
 			}
-			// A null (~, null, or nothing) is no value.
+			// A null (~, null, or nothing) is kept as written.
 			null := ev.Kind == yaml.Scalar && ev.Style == yaml.Plain && ev.Tag == "" && yamlNull(v)
 			if !top.mapping && top.scalar {
 				top.items = append(top.items, fmItem{v: v, null: null})
@@ -271,9 +279,11 @@ func yamlFrontMatter(content []byte) (values []fmValue, cut bool, why string) {
 				continue
 			}
 			path, long := child(top)
-			if !null {
-				add(fmValue{path: path, long: long, items: []string{v}})
+			fv := fmValue{path: path, long: long, items: []string{v}}
+			if null {
+				fv.nulls = []bool{true}
 			}
+			add(fv)
 		}
 	}
 	return values, cut, ""
@@ -289,6 +299,13 @@ func looseFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
 		cur  *fmValue
 		more []string // the lines that continue cur's first item
 	)
+	// item adds an item to cur's, written raw: a null when it is one
+	// unquoted (nothing, "~", "null").
+	var nulls []bool
+	item := func(raw string) {
+		cur.items = append(cur.items, unquote(raw))
+		nulls = append(nulls, yamlNull(raw))
+	}
 	flush := func() {
 		if cur == nil {
 			return
@@ -297,10 +314,18 @@ func looseFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
 			// Joined once: a value of many lines costs its length.
 			cur.items[0] += " " + strings.Join(more, " ")
 			more = more[:0]
+			nulls[0] = false
 		}
+		if len(cur.items) == 0 {
+			item("") // a key with nothing after it: a null
+		}
+		if slices.Contains(nulls, true) {
+			cur.nulls = slices.Clone(nulls)
+		}
+		nulls = nulls[:0]
 		if len(values) >= maxFrontMatterKeys {
 			cut = true
-		} else if len(cur.items) > 0 {
+		} else {
 			values = append(values, *cur)
 		}
 		cur = nil
@@ -317,12 +342,14 @@ func looseFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
 			if cur == nil {
 				return nil, false, false
 			}
-			if item, ok := strings.CutPrefix(t, "- "); ok || t == "-" {
-				cur.items, cur.list = append(cur.items, unquote(strings.TrimSpace(item))), true
+			if it, ok := strings.CutPrefix(t, "- "); ok || t == "-" {
+				item(strings.TrimSpace(it))
+				cur.list = true
 			} else if len(cur.items) > 0 && !cur.list {
 				more = append(more, t)
 			} else {
 				cur.items = append(cur.items, t)
+				nulls = append(nulls, false)
 			}
 			continue
 		}
@@ -333,7 +360,7 @@ func looseFrontMatter(content []byte) (values []fmValue, cut, ok bool) {
 		flush()
 		cur = &fmValue{path: line[:colon]}
 		if v := strings.TrimSpace(line[colon+1:]); v != "" {
-			cur.items = []string{unquote(v)}
+			item(v)
 		}
 	}
 	flush()
@@ -498,7 +525,10 @@ func splitTOMLArray(v string) []string {
 // metadata: title, author(s), description, keywords and tags, language,
 // and dates to their fields when these are empty; every other value in
 // Extra under front_matter.<path>. A list is written with ", " between
-// its items in Extra.
+// its items in Extra. A null (~, null, or nothing) or an empty string is
+// no title, author, keyword or date: a key whose value is only that is in
+// Extra as written ("~", "null", ""), and a null in a list of authors or
+// keywords is left out of it. In a list in Extra, a null is as written.
 //
 // It returns the values cut at MaxMetaValue or left out for a key path
 // longer than maxFrontMatterKey, and the authors and keywords left out
@@ -525,25 +555,37 @@ func applyFrontMatter(md *gofastcore.Metadata, fm frontMatter, ctl *int) (cut, l
 			cut++
 			continue
 		}
+		// all is every item as written, nulls and empty strings too; items
+		// those that are a value for a field of Metadata.
+		all := make([]string, 0, len(v.items))
 		items := make([]string, 0, len(v.items))
-		for _, it := range v.items {
+		for i, it := range v.items {
 			s, c := cleanMeta(it)
 			*ctl += c
 			if len(s) > MaxMetaValue {
 				s, cut = cutUTF8(s, MaxMetaValue), cut+1
 			}
-			if s != "" {
+			all = append(all, s)
+			if s != "" && (v.nulls == nil || !v.nulls[i]) {
 				items = append(items, s)
 			}
 		}
+		if len(all) == 0 {
+			continue // an empty list
+		}
+		join := func(items []string) string {
+			one := strings.Join(items, ", ")
+			if len(one) > MaxMetaValue {
+				one, cut = cutUTF8(one, MaxMetaValue), cut+1
+			}
+			return one
+		}
+		one := join(items)
+		field := fmField(v.path)
 		if len(items) == 0 {
-			continue
+			field = "" // no value for a field: in Extra, as written
 		}
-		one := strings.Join(items, ", ")
-		if len(one) > MaxMetaValue {
-			one, cut = cutUTF8(one, MaxMetaValue), cut+1
-		}
-		switch fmField(v.path) {
+		switch field {
 		case "title":
 			if md.Title == "" && !v.list {
 				md.Title = one
@@ -582,6 +624,9 @@ func applyFrontMatter(md *gofastcore.Metadata, fm frontMatter, ctl *int) (cut, l
 		}
 		key, c := cleanMeta(v.path)
 		*ctl += c
+		if len(all) > len(items) {
+			one = join(all)
+		}
 		extra(ExtraFrontMatterPrefix+key, one)
 	}
 	return cut, listLeft

@@ -69,6 +69,10 @@ type dEvent struct {
 	key    keyRef // a member of an object
 	hasKey bool
 	cell   dCell // evScalar: the value
+	// comment: the text between the event before and this one, in the
+	// innermost object, holds a comment. An object with a comment is no
+	// record: a row would not show it.
+	comment bool
 }
 
 // dCell is a scalar value as a table cell: text when the reader made it,
@@ -190,7 +194,7 @@ func (s *dSplitter) event(ev dEvent) bool {
 			s.emit(nil, u, u)
 			break
 		}
-		if ev.kind == evRaw {
+		if ev.kind == evRaw || ev.comment {
 			p.flat = false
 		} else if p.obj && p.flat {
 			c := ev.cell
@@ -202,6 +206,9 @@ func (s *dSplitter) event(ev dEvent) bool {
 		s.check(ev.end)
 		f := s.stack[len(s.stack)-1]
 		f.unit.end = ev.end
+		if ev.comment {
+			f.flat = false
+		}
 		var p *dFrame
 		if len(s.stack) > 1 {
 			p = s.stack[len(s.stack)-2]
@@ -214,8 +221,7 @@ func (s *dSplitter) event(ev dEvent) bool {
 		case p == nil && !f.obj && len(f.kids) >= 2 && allRecords(f.kids):
 			// A top-level array of records is a table.
 			s.becomeSplit(f, nil)
-			s.flushRun(f)
-			s.flushGroup(f)
+			s.closeSplit(f, ev.end)
 		case p == nil:
 			s.emit(nil, f.unit, f.unit)
 		}
@@ -608,10 +614,18 @@ func (s *dSplitter) dedentComments(f *dFrame, end int) (cs, ce int) {
 		ind++
 	}
 	pos := max(end, s.lastEnd)
-	if pos > 0 && pos < len(s.src) && s.src[pos-1] != '\n' && s.src[pos-1] != '\r' {
-		_, pos = lineAt(s.src, pos) // the rest of end's line is extendEnd's
-	}
 	cs, ce = -1, -1
+	if pos > 0 && pos < len(s.src) && s.src[pos-1] != '\n' && s.src[pos-1] != '\r' {
+		// The rest of end's line is extendEnd's, but for a row of a
+		// table, which holds values only.
+		le, next := lineAt(s.src, pos)
+		if len(f.run.rows) > 0 {
+			if i := s.commentIn(pos, le); i >= 0 {
+				cs, ce = i, le
+			}
+		}
+		pos = next
+	}
 	for pos < len(s.src) {
 		// Only the start of a line is looked at before it is taken.
 		i := pos
@@ -719,39 +733,45 @@ func (s *dSplitter) table(p *dFrame) {
 	r.rows = r.rows[:0]
 }
 
-// trailing makes a block of the comments after the last block, up to end.
+// trailing makes a block of the comments after the last block, up to
+// end: from the first to the end of the last, with what is between them
+// (closing brackets, a YAML "..."), as written.
 func (s *dSplitter) trailing(end int) {
 	if s.spent || s.comment == nil {
 		return
 	}
-	pos := s.lastEnd
-	// The rest of the line of the last block is not a line of its own.
-	if pos > 0 && pos < end && s.src[pos-1] != '\n' && s.src[pos-1] != '\r' {
-		_, pos = lineAt(s.src, pos)
-	}
 	// What was looked at before, with no block made since, is not looked
 	// at again.
-	if s.scanned > pos {
-		pos = s.scanned
-	}
+	pos := max(s.lastEnd, s.scanned)
 	s.scanned = max(s.scanned, end)
 	first, last := -1, -1
 	for pos < end {
-		ls, next := lineAt(s.src, pos)
-		line := s.src[pos:min(ls, end)]
-		if s.comment(line) {
-			if first < 0 {
-				first = pos
-			}
-			last = min(ls, end)
-		} else if !isBlank(line) {
-			first, last = -1, -1 // only the comments after the last text
+		i := s.commentIn(pos, end)
+		if i < 0 {
+			break
 		}
-		pos = next
+		if first < 0 {
+			first = i
+		}
+		last = s.commentEnd(i, end)
+		pos = last
 	}
 	if first >= 0 {
 		s.emit(nil, dUnit{start: first, end: last}, dUnit{start: first, end: last})
 	}
+}
+
+// commentEnd returns the end of the comment at i, not past end: a block
+// comment's "*/", else the end of its line.
+func (s *dSplitter) commentEnd(i, end int) int {
+	if s.format == "json" && s.src[i+1] == '*' {
+		if j := bytes.Index(s.src[i+2:end], []byte("*/")); j >= 0 {
+			return i + 2 + j + 2
+		}
+		return end
+	}
+	le, _ := lineAt(s.src, i)
+	return min(le, end)
 }
 
 // notRead returns where the text not made into blocks begins: after the

@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.0 (2026-11-25)
+## Unreleased
 
 - **JSON and YAML are cut along their structure**, no longer every 1,000
   lines. A top-level value of at most 4 KiB is one block; a longer one is
@@ -17,18 +17,21 @@
   top-level array of records is a table at any length. The key line and
   the comments before a table are a `code` block of their own at the
   container's path; a comment between two records ends the run there; a
-  comment after a split container's last member is kept in a block. An
-  object with a key twice is not a record, nor a YAML mapping with an
-  anchor or a tag; a YAML cell keeps its anchor and tag as written
+  comment after a split container's last member is kept in a block, and
+  the comments after a document's last value (after its closing
+  brackets) are a block of their own. An object with a key twice is not
+  a record, nor one with a comment inside it (a row holds values only),
+  nor a YAML mapping with an anchor or a tag; a YAML cell keeps its anchor and tag as written
   (`&who "Ann"`). Header and cells have ligatures written as letters.
   Long lines (minified JSON) and deep paths cost time and memory linear
   in the input.
 - **JSON Lines** (`.jsonl`, `.ndjson`, `.jsonlines`), and a `.json`
   holding several values, is a sequence of values; a line that is not
   JSON is a block as written; in a file named as JSON Lines, that is its
-  one line, and the next line is read as a value. JSON with comments and
-  trailing commas
-  (`.jsonc`, `tsconfig.json`) is read.
+  one line, and the next line is read as a value; a value nested deeper
+  than 512 is kept as written, with `limit.exceeded` counting them.
+  JSON with comments and trailing commas (`.jsonc`, `tsconfig.json`) is
+  read.
 - **YAML is parsed** with a YAML 1.2 parser of the library's own
   (`internal/yaml`), which passes all 402 cases of the YAML test suite.
   Text that is not JSON or YAML is read as lines as before, with
@@ -43,8 +46,12 @@
   go to the metadata (title, authors, description, keywords and tags,
   language, dates) and to `Extra["front_matter.<key>"]`. Front matter
   that is not YAML but is `key: value` lines (Cursor's rules) is read
-  line by line, with `input.repaired`. A YAML null is no value; the keys
-  of a TOML array of tables are not read; metadata values have ligatures
+  line by line, with `input.repaired`. A YAML null (`~`, `null`, nothing)
+  or an empty string is no title, author, keyword or date: a key with
+  only that is in `Extra["front_matter.<key>"]` as written (`~`, `null`,
+  `""`), as is a null in a list there; a null in a list of authors or
+  keywords is left out of it. The keys of a TOML array of tables are not
+  read; metadata values have ligatures
   written as letters. A list joined into one value is cut at 64 KiB;
   values whose key path is over 1,024 bytes are left out; authors and
   keywords stop at 256; each with `limit.exceeded`. `Detect` reads
@@ -55,7 +62,7 @@
   and French, Hugo, Jekyll). No error, Validate failure or panic; every
   code block's text is the input at its location.
 
-## Unreleased
+## v0.5.0 (2026-11-25)
 
 - **Web pages saved as one file (MHTML, `.mht`, `.mhtml`)**, format `mht`, as Chrome, Edge, Internet Explorer, UnMHT and WebKit save them. The page is read as HTML into the body, with the images it shows taken from the file; images it does not show are stored manifest items, frames and other files embedded documents, style sheets and fonts not listed. The file's header adds the title, the date saved, the saving program and the page's address to the metadata. Images a page shows through `srcset` or `<picture>` are found in the file. `Detect` knows the extensions and the header of a saved page. The command reads `.mht` and `.mhtml` files in a directory, takes `-as mht`, and reads an HTML child with the charset of its media type. Over the public corpus's 40 MHTML files (Chromium's test files and pages saved by Chrome): no error, no Validate failure.
 - **Subtitles and captions: SubRip (`srt`) and WebVTT (`vtt`).** One part
