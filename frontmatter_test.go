@@ -141,13 +141,28 @@ func TestFrontMatterBounds(t *testing.T) {
 	}
 }
 
-// Nulls are no value; keys after an array of tables are read again from
-// the next [table]; a key path past maxFrontMatterKey is left out.
+// Nulls are kept as written, but are no keyword or title; keys after an
+// array of tables are read again from the next [table]; a key path past
+// maxFrontMatterKey is left out.
 func TestFrontMatterNullsTablesLongPaths(t *testing.T) {
-	doc := dataDoc(t, "n.md", "---\ntags: [a, ~, null, b]\nother: NULL\nkept: \"null\"\n---\nBody\n", nil)
+	doc := dataDoc(t, "n.md", "---\ntags: [a, ~, null, b]\nother: NULL\nkept: \"null\"\ntitle: ~\nempty:\nquoted: \"\"\n"+
+		"list: [x, null, '']\nauthors:\n  - name: ~\n  - Bob\n---\nBody\n", nil)
 	md := doc.Metadata
-	if strings.Join(md.Keywords, "|") != "a|b" || md.Extra["front_matter.other"] != "" || md.Extra["front_matter.kept"] != "null" {
+	want := map[string]string{"front_matter.other": "NULL", "front_matter.kept": "null", "front_matter.title": "~",
+		"front_matter.empty": "", "front_matter.quoted": "", "front_matter.list": "x, null, ", "front_matter.authors[0].name": "~"}
+	if strings.Join(md.Keywords, "|") != "a|b" || md.Title != "" || strings.Join(md.Authors, "|") != "Bob" || len(md.Extra) != len(want) {
 		t.Errorf("nulls: %+v", md)
+	}
+	for k, v := range want {
+		if got, ok := md.Extra[k]; !ok || got != v {
+			t.Errorf("nulls: %s = %q (%v), want %q", k, got, ok, v)
+		}
+	}
+	// Loose front matter: a key with nothing after it is a null too.
+	doc = dataDoc(t, "r.mdc", "---\nglobs: **/*.go\nalwaysApply:\ndescription: ~\n---\nBody\n", nil)
+	if md := doc.Metadata; md.Extra["front_matter.alwaysApply"] != "" || md.Extra["front_matter.description"] != "~" ||
+		md.Extra["description"] != "" || len(md.Extra) != 3 {
+		t.Errorf("loose nulls: %+v", md.Extra)
 	}
 	doc = dataDoc(t, "t.md", "+++\n[[resources]]\nsrc = \"x\"\n[params]\nsrc = \"y\"\n+++\nBody\n", nil)
 	if md := doc.Metadata; md.Extra["front_matter.src"] != "" || md.Extra["front_matter.params.src"] != "y" {

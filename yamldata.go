@@ -67,6 +67,10 @@ func (e *Extractor) yamlStructure(ctx context.Context, src []byte, m *charset.Ma
 		skip     int // the depth inside a complex key being skipped
 		skipFrom int
 		doc      int
+		// gap is where the text after the last event begins; comment
+		// says a comment was in it since the last event, in a mapping.
+		gap     int
+		comment bool
 	)
 	p = yaml.NewParser(src, yaml.Limits{})
 	for n := 0; ; n++ {
@@ -92,6 +96,15 @@ func (e *Extractor) yamlStructure(ctx context.Context, src []byte, m *charset.Ma
 			}
 			continue
 		}
+		at := ev.Start
+		switch ev.Kind {
+		case yaml.Scalar, yaml.MappingStart, yaml.SequenceStart:
+			at = min(at, ev.PropStart)
+		}
+		if k := len(stack) - 1; k >= 0 && stack[k].mapping && at > gap && s.commentIn(gap, at) >= 0 {
+			comment = true
+		}
+		gap = max(gap, ev.End)
 		switch ev.Kind {
 		case yaml.DocumentStart:
 			// Comments before a "---" (or a directive) are the end of the
@@ -100,6 +113,7 @@ func (e *Extractor) yamlStructure(ctx context.Context, src []byte, m *charset.Ma
 			if ev.Explicit {
 				s.trailing(ev.Start)
 			}
+			comment = false
 			doc++
 			if docs > 1 {
 				s.doc = strconv.Itoa(doc)
@@ -155,6 +169,7 @@ func (e *Extractor) yamlStructure(ctx context.Context, src []byte, m *charset.Ma
 		if hasKey {
 			dev.key, dev.hasKey = keyRef{s: key, set: true}, true
 		}
+		dev.comment, comment = comment, false
 		if !s.event(dev) {
 			break
 		}

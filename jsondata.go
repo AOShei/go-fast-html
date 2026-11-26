@@ -23,8 +23,12 @@ func jsonLinesName(name string) bool {
 }
 
 // rawRegion is a stretch of JSON Lines that is not JSON: from the start
-// of the line a value began on to the end of the line of its error.
-type rawRegion struct{ start, end, next int }
+// of the line a value began on to the end of the line of its error. deep:
+// the error is the nesting bound.
+type rawRegion struct {
+	start, end, next int
+	deep             bool
+}
 
 // jsonPlan is what a first reading of a JSON file found.
 type jsonPlan struct {
@@ -71,7 +75,8 @@ func planJSON(ctx context.Context, src []byte, lines, oneLine bool) (jsonPlan, e
 					end, next = le, ln
 				}
 			}
-			pl.regions = append(pl.regions, rawRegion{start: lineStart(src, at), end: end, next: next})
+			pl.regions = append(pl.regions, rawRegion{start: lineStart(src, at), end: end, next: next,
+				deep: je.Msg == jsonscan.ErrDepth})
 			sc.Reset(next)
 			valueStart = -1
 			continue
@@ -156,6 +161,13 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 		key    keyRef
 		hasKey bool
 		ri     int
+		// deep counts the lines kept as written for their nesting, from
+		// the first at deepAt.
+		deep, deepAt int
+		// gap is where the text after the last token begins; comment
+		// says a comment was in it since the last event, in an object.
+		gap     int
+		comment bool
 	)
 	for n := 0; ; n++ {
 		if n&4095 == 0 {
@@ -172,7 +184,14 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 				if !s.event(dEvent{kind: evRaw, start: r.start, end: r.end}) {
 					break
 				}
+				if r.deep {
+					if deep == 0 {
+						deepAt = r.start
+					}
+					deep++
+				}
 				sc.Reset(r.next)
+				gap, comment = r.next, false
 				continue
 			}
 		}
@@ -181,6 +200,10 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 		}
 		start := tok.Start
 		inObj := len(objs) > 0 && objs[len(objs)-1]
+		if inObj && start > gap && s.commentIn(gap, start) >= 0 {
+			comment = true
+		}
+		gap = tok.End
 		member := func() dEvent {
 			ev := dEvent{start: start}
 			if inObj && hasKey {
@@ -206,12 +229,18 @@ func (e *Extractor) jsonStructure(ctx context.Context, src []byte, m *charset.Ma
 			ev.kind, ev.end = evScalar, tok.End
 			ev.cell = dCell{vstart: tok.Start, vend: tok.End, quoted: tok.Kind == jsonscan.String}
 		}
+		ev.comment, comment = comment, false
 		if !s.event(ev) {
 			break
 		}
 	}
 	if lines {
 		s.closeVirtual(len(src))
+	}
+	if deep > 0 {
+		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
+			fmt.Sprintf("%s nested deeper than %d: kept as written, not read by structure (the first at %s)",
+				count(deep, "value", "values"), jsonscan.DefaultMaxDepth, syntaxPlace(src, deepAt)))
 	}
 	s.event(dEvent{kind: evDocEnd, end: len(src)})
 	return s, nil, nil
