@@ -80,6 +80,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		maxInput = flags.Int64("max-input-bytes", 0, "size of a file read (0: the default, 256 MiB; -1: no limit)")
 		maxBytes = flags.Int64("max-decoded-bytes", 0, "bytes decoded from a file (0: the default, 1 GiB; -1: no limit)")
 		maxText  = flags.Int64("max-text-bytes", 0, "bytes of text a document may hold (0: the default, 256 MiB; -1: no limit)")
+		dataBlk  = flags.Int("data-block-bytes", 0, "the size JSON and YAML are cut to: a value up to this many bytes is one block, a longer one is split into members packed into blocks of about this size (0: the default, 1024)")
 		quiet    = flags.Bool("quiet", false, "say nothing about files that were read; failures are still reported")
 		version  = flags.Bool("version", false, "print the version and exit")
 	)
@@ -115,6 +116,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "", "html", "md", "txt", "epub", "csv", "tsv", "ipynb", "json", "yaml", "mht", "srt", "vtt":
 	default:
 		return fail("unknown value %q for -as: html, md, txt, epub, csv, tsv, ipynb, json, yaml, mht, srt or vtt", *as)
+	}
+	if *dataBlk < 0 {
+		return fail("-data-block-bytes wants a size in bytes, or 0 for the default, not %d", *dataBlk)
 	}
 	var delimiter rune
 	switch *delim {
@@ -153,7 +157,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		opts.Parts = gofastcore.PartRange{First: a, Last: b}
 	}
 	extractor := &gofasthtml.Extractor{Format: *as, MaxDepth: *maxDepth, MaxArchiveMembers: *members, Charset: *cs,
-		Delimiter: delimiter, Header: *header, NoQuotes: *noQuotes}
+		Delimiter: delimiter, Header: *header, NoQuotes: *noQuotes, DataBlockBytes: *dataBlk}
 	// A document an EPUB holds besides its chapters, or an MHTML file
 	// besides its page (a frame), is read too if it is one of the formats
 	// of this library, by its media type; the charset parameter of a text

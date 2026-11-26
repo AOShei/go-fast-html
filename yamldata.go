@@ -50,7 +50,7 @@ func (e *Extractor) yamlStructure(ctx context.Context, src []byte, m *charset.Ma
 			docs++
 		}
 	}
-	s := &dSplitter{ctx: ctx, src: src, m: m, format: "yaml", limit: dataUnitBytes, text: text, part: part, head: -1,
+	s := &dSplitter{ctx: ctx, src: src, m: m, format: "yaml", limit: e.dataBlockBytes(), text: text, part: part, head: -1,
 		comment: yamlComment}
 	s.keyText = func(k keyRef) string { return k.s }
 	s.cellText = func(c dCell) string { return c.text }

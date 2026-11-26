@@ -324,3 +324,17 @@ func TestCommandMHTML(t *testing.T) {
 		t.Fatalf("code %d, %q", code, out)
 	}
 }
+
+func TestCommandDataBlockBytes(t *testing.T) {
+	src := "[\"" + strings.Repeat("a", 600) + "\", \"" + strings.Repeat("b", 600) + "\"]"
+	for arg, want := range map[string]int{"-data-block-bytes=0": 2, "-data-block-bytes=4096": 1} {
+		out, _, code := cli(t, src, "-as", "json", arg, "-")
+		var doc gofastcore.Document
+		if code != 0 || json.Unmarshal([]byte(out), &doc) != nil || len(doc.Parts[0].Blocks) != want {
+			t.Errorf("%s: exit %d, %d blocks, want %d", arg, code, len(doc.Parts), want)
+		}
+	}
+	if _, errs, code := cli(t, "[]", "-as", "json", "-data-block-bytes=-1", "-"); code != 2 || !strings.Contains(errs, "-data-block-bytes") {
+		t.Errorf("negative: exit %d, %q", code, errs)
+	}
+}

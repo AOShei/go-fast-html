@@ -1,6 +1,7 @@
 package gofasthtml
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -290,5 +291,39 @@ func TestDetectNewExtensions(t *testing.T) {
 		if got := Detect(name, nil); got != want {
 			t.Errorf("Detect(%q) = %q", name, got)
 		}
+	}
+}
+
+// Extractor.DataBlockBytes sets the size JSON and YAML are cut to.
+func TestDataBlockBytes(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("{")
+	for i := range 40 {
+		if i > 0 {
+			b.WriteString(",\n")
+		}
+		fmt.Fprintf(&b, " \"k%02d\": \"%s\"", i, strings.Repeat("v", 90))
+	}
+	b.WriteString("\n}\n") // 40 members of about 100 bytes: 4 KiB
+	src := b.String()
+	blocks := func(n int) int {
+		doc, err := (&Extractor{Format: "json", DataBlockBytes: n}).Extract(context.Background(), strings.NewReader(src), int64(len(src)), &gofastcore.Options{})
+		if err != nil || doc.Validate() != nil {
+			t.Fatal(err)
+		}
+		return len(doc.Parts[0].Blocks)
+	}
+	// The default is 1 KiB: about ten members a block.
+	if n := blocks(0); n != 4 && n != 5 {
+		t.Errorf("default: %d blocks", n)
+	}
+	if n := blocks(-1); n != blocks(0) {
+		t.Errorf("negative: %d blocks", n)
+	}
+	if n := blocks(8 << 10); n != 1 {
+		t.Errorf("8 KiB: %d blocks", n)
+	}
+	if n := blocks(100); n != 40 {
+		t.Errorf("100 bytes: %d blocks", n)
 	}
 }

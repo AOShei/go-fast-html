@@ -137,6 +137,28 @@ type Extractor struct {
 	// as RFC 4180 has them, in tsv too, as Excel, pandas and Python's
 	// excel-tab dialect write and read them.
 	NoQuotes bool
+	// DataBlockBytes is the size JSON and YAML are cut to: a top-level
+	// value of at most this many bytes is one block, and a longer one is
+	// split into its members, packed into blocks whose members span at
+	// most this many bytes, a longer member split in turn. Zero or less
+	// means DefaultDataBlockBytes. A chunker can join blocks that are
+	// next to each other without cutting a value, but cannot cut one
+	// without knowing JSON: give at most the size of its chunks.
+	DataBlockBytes int
+}
+
+// DefaultDataBlockBytes is the size JSON and YAML are cut to when
+// Extractor.DataBlockBytes is zero: 1 KiB, 280 to 540 tokens on average
+// over the test corpus by tokenizer and format, near the 512 tokens many
+// embedding models read.
+const DefaultDataBlockBytes = 1 << 10
+
+// dataBlockBytes is the size JSON and YAML are cut to.
+func (e *Extractor) dataBlockBytes() int {
+	if e.DataBlockBytes > 0 {
+		return e.DataBlockBytes
+	}
+	return DefaultDataBlockBytes
 }
 
 var _ gofastcore.Extractor = (*Extractor)(nil)

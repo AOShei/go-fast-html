@@ -3,10 +3,14 @@
 ## Unreleased
 
 - **JSON and YAML are cut along their structure**, no longer every 1,000
-  lines. A top-level value of at most 4 KiB is one block; a longer one is
-  split into its members, packed into blocks whose members span at most
-  4 KiB (with their indentation, key line and comments around), a longer
-  member split in turn, so that no value is cut. A block is the text as
+  lines. A top-level value of at most the block size is one block; a
+  longer one is split into its members, packed into blocks whose members
+  span at most the block size (with their indentation, key line and
+  comments around), a longer member split in turn, so that no value is
+  cut. The block size is 1 KiB by default (`DefaultDataBlockBytes`: 280 to
+  540 tokens on average over the corpus, by tokenizer and format, near
+  the 512 many embedding models read), set by
+  `Extractor.DataBlockBytes` and the command's `-data-block-bytes`. A block is the text as
   written, with the comments around its members; `Loc.Anchor` is the
   path of its first member (`spec.containers[0]`), `Attrs["path_end"]`
   that of its last; in a YAML file of several documents,

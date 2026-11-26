@@ -211,7 +211,9 @@ func FuzzData(f *testing.F) {
 			opts.Limits = gofastcore.Limits{MaxTextBytes: 600, MaxDecodedBytes: 2000}
 		}
 		for _, format := range []string{"json", "yaml"} {
-			e := &Extractor{Format: format}
+			// Small block sizes split small inputs: by the input's length,
+			// the default, 32 or 200 bytes.
+			e := &Extractor{Format: format, DataBlockBytes: []int{0, 32, 200}[len(b)%3]}
 			doc, err := e.Extract(context.Background(), bytes.NewReader(b), int64(len(b)), opts)
 			if errors.Is(err, ErrEncodingUnknown) {
 				e.Charset = "windows-1252"
