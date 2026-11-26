@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **go-fast-core v0.1.10** (was v0.1.6). Of the core code this module
+  uses, the only change since v0.1.6 is two new stored kinds:
+  `gofasthtml -stored=` now also accepts `shape_data` and `linked_data`,
+  which Visio drawings in go-fast-ooxml will use.
+
 ## v0.6.0 (2026-11-26)
 
 - **JSON and YAML are cut along their structure**, no longer every 1,000
