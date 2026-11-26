@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.6.0 (2026-11-26)
 
 - **JSON and YAML are cut along their structure**, no longer every 1,000
   lines. A top-level value of at most the block size is one block; a
