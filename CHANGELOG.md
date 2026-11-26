@@ -4,7 +4,8 @@
 
 - **JSON and YAML are cut along their structure**, no longer every 1,000
   lines. A top-level value of at most 4 KiB is one block; a longer one is
-  split into its members, packed into blocks of at most 4 KiB, a longer
+  split into its members, packed into blocks whose members span at most
+  4 KiB (with their indentation, key line and comments around), a longer
   member split in turn, so that no value is cut. A block is the text as
   written, with the comments around its members; `Loc.Anchor` is the
   path of its first member (`spec.containers[0]`), `Attrs["path_end"]`

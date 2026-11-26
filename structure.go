@@ -15,8 +15,9 @@ import (
 // A document's top-level value is one block when it is at most
 // dataUnitBytes long. A longer one is split into its members (an
 // object's members, an array's elements), and consecutive members are
-// packed into blocks of at most dataUnitBytes; a member longer than that
-// is split in turn, so that no value is ever cut. Each block is the text
+// packed into blocks whose members span at most dataUnitBytes (a block
+// adds the indentation, head and comments around them); a member longer
+// than that is split in turn, so that no value is ever cut. Each block is the text
 // of its members as the file writes them, with the comments just before
 // a member and after it on its line, and Loc.Anchor is the path of its
 // first member (Attrs["path_end"] that of its last).
