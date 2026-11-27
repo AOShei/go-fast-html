@@ -69,7 +69,7 @@ func (e *Extractor) csv(ctx context.Context, doc *gofastcore.Document, src []byt
 	decode.Take(int64(len(decoded)))
 	if invalid > 0 {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextUnmappedGlyphs,
-			fmt.Sprintf("%d byte sequences are not valid %s and appear as U+FFFD", invalid, enc.Enc))
+			invalidMessage(invalid, enc.Enc.String()))
 	}
 	if cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,

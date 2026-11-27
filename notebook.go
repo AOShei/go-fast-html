@@ -106,7 +106,7 @@ func (e *Extractor) notebook(ctx context.Context, doc *gofastcore.Document, src 
 	t := &tally{}
 	if n := nbInvalidUTF8(src); n > 0 {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextUnmappedGlyphs,
-			fmt.Sprintf("%d byte sequences are not valid UTF-8 and appear as U+FFFD", n))
+			invalidMessage(n, "UTF-8"))
 	}
 	doc.Metadata = r.metadata(top["metadata"], t)
 	if hasVersion {

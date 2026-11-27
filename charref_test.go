@@ -51,3 +51,16 @@ func TestCharRefsReplacedAreWarned(t *testing.T) {
 		t.Errorf("two: %q", m)
 	}
 }
+
+// The warning for bytes not valid in the encoding says they are read as
+// U+FFFD (not "appear": some are in no text given, a script's), in the
+// singular for one.
+func TestInvalidBytesMessage(t *testing.T) {
+	doc := extract(t, "<meta charset=\"utf-8\"><p>caf\xff au lait \xff</p>", nil)
+	if got := warnings(doc, gofastcore.WarnTextUnmappedGlyphs); len(got) != 1 || !strings.HasSuffix(got[0], " byte sequences are not valid utf-8 and are read as U+FFFD") {
+		t.Errorf("%q", got)
+	}
+	if m := invalidMessage(1, "UTF-8"); m != "1 byte sequence is not valid UTF-8 and is read as U+FFFD" {
+		t.Errorf("one: %q", m)
+	}
+}

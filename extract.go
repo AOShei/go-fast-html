@@ -623,7 +623,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	decode.Take(int64(len(decoded)))
 	if invalid > 0 {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextUnmappedGlyphs,
-			fmt.Sprintf("%d byte sequences are not valid %s and appear as U+FFFD", invalid, enc.Enc))
+			invalidMessage(invalid, enc.Enc.String()))
 	}
 	if cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
@@ -840,6 +840,13 @@ func count(n int, one, many string) string {
 		return "1 " + one
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+// invalidMessage is the text.unmapped_glyphs message for n byte sequences
+// that are not valid in the encoding enc, each read as U+FFFD.
+func invalidMessage(n int, enc string) string {
+	return count(n, "byte sequence is", "byte sequences are") + " not valid " + enc + " and " +
+		map[bool]string{true: "is", false: "are"}[n == 1] + " read as U+FFFD"
 }
 
 // replacedMessage is the text.unmapped_glyphs message for n character
