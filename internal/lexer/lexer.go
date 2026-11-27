@@ -84,6 +84,9 @@ type Lexer struct {
 	// adjusted current node is in a foreign namespace (SVG, MathML).
 	CDATA bool
 	sb    []byte
+	// Replaced counts the character references to no character (&#0;, a
+	// surrogate, a number past U+10FFFF) read as U+FFFD.
+	Replaced int
 }
 
 // New returns a lexer over src, which must be UTF-8 and must not be
@@ -439,7 +442,11 @@ func (l *Lexer) charRef(dst []byte, inAttr bool) []byte {
 			q++
 		}
 		l.pos = q
-		return utf8.AppendRune(dst, entity.Numeric(v))
+		r := entity.Numeric(v)
+		if r == utf8.RuneError && v != utf8.RuneError {
+			l.Replaced++
+		}
+		return utf8.AppendRune(dst, r)
 	}
 	repl, n, semi, ok := entity.Named(s[p:])
 	if !ok {

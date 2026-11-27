@@ -20,6 +20,9 @@ type HTML struct {
 	segs []seg
 	// Cut reports that rendering stopped at the size limit.
 	Cut bool
+	// Replaced counts the character references to no character (&#0;, a
+	// surrogate, a number past U+10FFFF) read as U+FFFD.
+	Replaced int
 }
 
 // Source returns the offset in the Markdown of offset h in the HTML.
@@ -49,7 +52,7 @@ type renderer struct {
 // Render writes the document as HTML, stopping before limit bytes. Link
 // and image addresses are written as the source has them.
 func (d *Doc) Render(limit int) *HTML {
-	r := &renderer{o: &HTML{}, refs: d.refs, limit: limit, gfm: d.GFM}
+	r := &renderer{o: &HTML{Replaced: d.replaced}, refs: d.refs, limit: limit, gfm: d.GFM}
 	r.block(d.root, false)
 	return r.o
 }
@@ -57,7 +60,7 @@ func (d *Doc) Render(limit int) *HTML {
 // RenderSpec writes the document as the CommonMark reference renderer
 // does, with addresses percent-encoded, for comparison with the spec.
 func (d *Doc) RenderSpec() *HTML {
-	r := &renderer{o: &HTML{}, refs: d.refs, limit: 1 << 30, spec: true}
+	r := &renderer{o: &HTML{Replaced: d.replaced}, refs: d.refs, limit: 1 << 30, spec: true}
 	r.block(d.root, false)
 	return r.o
 }
@@ -250,7 +253,7 @@ func taskItem(p *block) {
 // inline renders the inline content s, walking the tree without
 // recursion, since emphasis can nest as deep as the text is long.
 func (r *renderer) inline(s string) {
-	root := inlines(s, r.refs, r.gfm)
+	root := inlines(s, r.refs, r.gfm, &r.o.Replaced)
 	n := root.first
 	for n != nil {
 		switch n.kind {

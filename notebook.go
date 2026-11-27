@@ -153,7 +153,7 @@ func (e *Extractor) notebook(ctx context.Context, doc *gofastcore.Document, src 
 			"the limit on decoded bytes was reached; the rest of the notebook was not read"+r.left)
 	}
 	part.Blocks = r.agg.Blocks
-	e.report(&part, walked{res: r.agg, caps: r.caps, limited: r.limited, left: r.left}, r.decodeCut, r.pc, t)
+	e.report(&part, walked{res: r.agg, caps: r.caps, limited: r.limited, left: r.left, replaced: r.replaced}, r.decodeCut, r.pc, t)
 	doc.Parts = append(doc.Parts, part)
 	if len(t.stored) > 0 && opts.Parts == (gofastcore.PartRange{}) {
 		stored := gofastcore.Part{Kind: gofastcore.PartStored, Number: 2, Blocks: t.stored}
@@ -177,6 +177,7 @@ type nbReader struct {
 
 	agg       *blocks.Result // what the walks of the cells found
 	caps      dom.Caps
+	replaced  int // character references read as U+FFFD (walked.replaced)
 	limited   bool
 	decodeCut bool   // the decode budget ran out
 	left      string // the cells not read, for the warning
@@ -531,6 +532,7 @@ func (r *nbReader) markdown(s string) (fragment, error) {
 	if h.Cut {
 		r.decodeCut = true
 	}
+	r.replaced += h.Replaced
 	return fragment{html: h.B}, nil
 }
 
@@ -741,7 +743,9 @@ func (r *nbReader) merge(w walked) {
 	a.FrameFlattened = a.FrameFlattened || s.FrameFlattened
 	a.FrameDecode = a.FrameDecode || s.FrameDecode
 	a.FrameCaps.Add(s.FrameCaps)
+	a.FrameReplaced += s.FrameReplaced
 	r.caps.Add(w.caps)
+	r.replaced += w.replaced
 	r.limited = r.limited || w.limited
 }
 

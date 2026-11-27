@@ -39,7 +39,7 @@ func isWebVTT(src []byte) bool {
 
 // subtitleCounts counts what reading the cues found, for the warnings.
 type subtitleCounts struct {
-	unparsed, empty, stray, controls, cut, anchors, attrs, deep int
+	unparsed, empty, stray, controls, cut, anchors, attrs, deep, replaced int
 }
 
 // subtitles reads SubRip (srt) or WebVTT (vtt) into one part of kind
@@ -112,6 +112,7 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 				c.empty++
 			}
 			c.controls += it.Controls
+			c.replaced += it.Replaced
 			return true
 		}
 		off := source(it.Start)
@@ -154,6 +155,7 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 			return false
 		}
 		c.controls += it.Controls
+		c.replaced += it.Replaced
 		if it.Cut {
 			c.cut++
 		}
@@ -227,6 +229,10 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 	}
 	if c.controls > 0 {
 		part.Warn(gofastcore.SeverityInfo, gofastcore.WarnTextControlCharactersRemoved, controlsMessage(c.controls, "the text"))
+	}
+	if c.replaced > 0 {
+		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextUnmappedGlyphs,
+			replacedMessage(c.replaced))
 	}
 	if len(part.Blocks) == 0 && !cut && !spent {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnPartNoText, "no text")

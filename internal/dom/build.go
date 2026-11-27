@@ -41,6 +41,9 @@ type Doc struct {
 	Limited bool
 	// Caps reports the other bounds of the builder that were reached.
 	Caps Caps
+	// Replaced counts the character references to no character (&#0;, a
+	// surrogate, a number past U+10FFFF) read as U+FFFD.
+	Replaced int
 }
 
 // Caps reports bounds of the builder, other than nesting, that were
@@ -135,7 +138,7 @@ func Parse(ctx context.Context, src []byte, opt Options) (*Doc, error) {
 	}
 	b.lastEnd = len(src)
 	b.popTo(1)
-	return &Doc{Root: b.root, Limited: b.limited, Caps: b.caps, b: b}, nil
+	return &Doc{Root: b.root, Limited: b.limited, Caps: b.caps, Replaced: b.lx.Replaced, b: b}, nil
 }
 
 func (b *builder) top() *entry { return &b.stack[len(b.stack)-1] }
