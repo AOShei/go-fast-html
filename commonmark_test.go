@@ -12,7 +12,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/AOShei/go-fast-html/internal/entity"
+	"github.com/AOShei/go-fast-core/entity"
 	"github.com/AOShei/go-fast-html/internal/md"
 )
 

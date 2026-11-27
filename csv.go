@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
-	"github.com/AOShei/go-fast-html/internal/charset"
+	"github.com/AOShei/go-fast-core/charset"
 )
 
 // Bounds of comma- and tab-separated input. Each protects against one

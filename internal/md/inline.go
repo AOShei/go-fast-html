@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/AOShei/go-fast-html/internal/entity"
+	"github.com/AOShei/go-fast-core/entity"
 )
 
 type ikind uint8

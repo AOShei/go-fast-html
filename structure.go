@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/AOShei/go-fast-core"
-	"github.com/AOShei/go-fast-html/internal/charset"
+	"github.com/AOShei/go-fast-core/charset"
 )
 
 // How JSON and YAML are cut by their structure.

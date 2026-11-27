@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 
 	"github.com/AOShei/go-fast-core"
+	"github.com/AOShei/go-fast-core/charset"
 	"github.com/AOShei/go-fast-html/internal/blocks"
-	"github.com/AOShei/go-fast-html/internal/charset"
 	"github.com/AOShei/go-fast-html/internal/css"
 	"github.com/AOShei/go-fast-html/internal/dom"
 	"github.com/AOShei/go-fast-html/internal/md"
@@ -602,7 +602,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	text, decode := pc.text, pc.decode
 	enc := charset.SniffText(src, pc.charset)
 	if format == "html" {
-		enc = charset.Sniff(src, pc.charset)
+		enc = charset.SniffHTML(src, pc.charset)
 	}
 	if err := t.sniffed(&enc, pc.chapter); err != nil {
 		return nil, err

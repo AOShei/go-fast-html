@@ -13,9 +13,9 @@ import (
 	"strings"
 
 	"github.com/AOShei/go-fast-core"
+	"github.com/AOShei/go-fast-core/charset"
+	"github.com/AOShei/go-fast-core/rfc822"
 	"github.com/AOShei/go-fast-html/internal/blocks"
-	"github.com/AOShei/go-fast-html/internal/charset"
-	"github.com/AOShei/go-fast-html/internal/mimepart"
 )
 
 // maxMIMEHeader bounds the header section of an MHTML file and of each of
@@ -73,13 +73,13 @@ const maxMIMEDepth = 8
 // multipart part in its place (Internet Explorer puts the page in a
 // multipart/alternative). It reports whether the boundary was found.
 func (a *mhtmlArchive) split(body []byte, boundary string, depth, maxParts int) bool {
-	mp := mimepart.Split(body, boundary, maxParts)
+	mp := rfc822.Split(body, boundary, maxParts)
 	delim := []byte("--" + boundary)
 	for _, p := range mp.Parts {
 		if bytes.Contains(p, delim) {
 			// A boundary that does not begin a line, after a part in
 			// binary encoding with no line break at its end.
-			mp = mimepart.SplitAnywhere(body, boundary, maxParts)
+			mp = rfc822.SplitAnywhere(body, boundary, maxParts)
 			a.repaired("boundaries that do not begin a line were taken as boundaries")
 			break
 		}
@@ -96,7 +96,7 @@ func (a *mhtmlArchive) split(body []byte, boundary string, depth, maxParts int) 
 			a.tooMany = true
 			return true
 		}
-		ph, pat, pprob := mimepart.ParseHeader(raw, maxMIMEHeader)
+		ph, pat, pprob := rfc822.ParseHeader(raw, maxMIMEHeader)
 		a.headerCut = a.headerCut || pprob.Truncated || pprob.TooMany
 		p := newPart(ph, raw[pat:])
 		if strings.HasPrefix(p.mediatype, "multipart/") && p.params["boundary"] != "" {
@@ -186,12 +186,12 @@ func (a *mhtmlArchive) data(p *mpart) ([]byte, bool) {
 			return nil, false
 		}
 		if p.cte == "base64" {
-			out = mimepart.Base64(p.body)
-			if mimepart.Base64Bad(p.body) {
+			out = rfc822.Base64(p.body)
+			if rfc822.Base64Bad(p.body) {
 				a.repaired("base64 with characters outside its alphabet; they were skipped")
 			}
 		} else {
-			out = mimepart.QuotedPrintable(p.body)
+			out = rfc822.QuotedPrintable(p.body)
 		}
 		if !a.decode.Take(int64(len(out))) {
 			p.overBudget = true
@@ -219,7 +219,7 @@ func (a *mhtmlArchive) repaired(msg string) {
 }
 
 // fieldValue returns a header field's value, unfolded, as text.
-func fieldValue(h mimepart.Header, name string) string {
+func fieldValue(h rfc822.Header, name string) string {
 	v, ok := h.Get(name)
 	if !ok {
 		return ""
@@ -232,8 +232,8 @@ func fieldValue(h mimepart.Header, name string) string {
 // or a From field "<Saved by ...>" (Internet Explorer, Chrome, UnMHT),
 // with a multipart/related Content-Type. A message is not taken for one.
 func isMHTML(src []byte) bool {
-	h, _, _ := mimepart.ParseHeader(src[:min(len(src), 16<<10)], 16<<10)
-	ct, _ := mimepart.Params([]byte(fieldValue(h, "Content-Type")))
+	h, _, _ := rfc822.ParseHeader(src[:min(len(src), 16<<10)], 16<<10)
+	ct, _ := rfc822.ParamsRelaxed([]byte(fieldValue(h, "Content-Type")))
 	if ct != "multipart/related" {
 		return false
 	}
@@ -292,17 +292,17 @@ func headerText(v string) string {
 // style sheets and fonts are styling and are not listed.
 func (e *Extractor) mhtml(ctx context.Context, doc *gofastcore.Document, src []byte, opts *gofastcore.Options,
 	text *gofastcore.TextBudget, decode *gofastcore.DecodeBudget) (*gofastcore.Document, error) {
-	h, at, prob := mimepart.ParseHeader(src, maxMIMEHeader)
+	h, at, prob := rfc822.ParseHeader(src, maxMIMEHeader)
 	if prob.TooMany {
 		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-			fmt.Sprintf("the file's header section has more than %d fields; the rest were not read", mimepart.MaxFields))
+			fmt.Sprintf("the file's header section has more than %d fields; the rest were not read", rfc822.MaxFields))
 	}
 	if prob.Truncated {
 		doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			fmt.Sprintf("the file's header section is longer than %d bytes; the rest of it was not read", maxMIMEHeader))
 	}
 	a := &mhtmlArchive{byLoc: map[string]int{}, byID: map[string]int{}, decode: decode}
-	ct, ctParams := mimepart.Params([]byte(fieldValue(h, "Content-Type")))
+	ct, ctParams := rfc822.ParamsRelaxed([]byte(fieldValue(h, "Content-Type")))
 	if len(h) == 0 {
 		// No header at all: the file is taken as the page itself.
 		a.repaired("the file has no MIME header; it was read as one HTML page")
@@ -319,7 +319,7 @@ func (e *Extractor) mhtml(ctx context.Context, doc *gofastcore.Document, src []b
 		}
 		if a.headerCut {
 			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
-				fmt.Sprintf("a part's header section is longer than %d bytes or has more than %d fields; the rest of it was not read", maxMIMEHeader, mimepart.MaxFields))
+				fmt.Sprintf("a part's header section is longer than %d bytes or has more than %d fields; the rest of it was not read", maxMIMEHeader, rfc822.MaxFields))
 		}
 		if a.tooDeep {
 			doc.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
@@ -521,14 +521,14 @@ func mimeToken(s string) bool {
 func isPage(mt string) bool { return mt == "text/html" || mt == "application/xhtml+xml" }
 
 // newPart reads a part's header.
-func newPart(h mimepart.Header, body []byte) mpart {
-	mt, params := mimepart.Params([]byte(fieldValue(h, "Content-Type")))
+func newPart(h rfc822.Header, body []byte) mpart {
+	mt, params := rfc822.ParamsRelaxed([]byte(fieldValue(h, "Content-Type")))
 	if _, ok := h.Get("Content-Type"); !ok {
 		mt = "text/plain" // RFC 2045's default
 	} else if !mediaType(mt) {
 		mt = "application/octet-stream"
 	}
-	cte, _ := mimepart.Params([]byte(fieldValue(h, "Content-Transfer-Encoding")))
+	cte, _ := rfc822.ParamsRelaxed([]byte(fieldValue(h, "Content-Transfer-Encoding")))
 	return mpart{mediatype: mt, params: params, cte: cte,
 		location: cleanLine(fieldValue(h, "Content-Location")),
 		id:       cleanLine(strings.Trim(fieldValue(h, "Content-ID"), "<> \t")),
@@ -540,7 +540,7 @@ func newPart(h mimepart.Header, body []byte) mpart {
 // browser wrote); the Date as Created; the program in a From field
 // "<Saved by X>" as Application; the page's address and every header
 // field in Extra under its lowercase name.
-func mhtmlMetadata(md *gofastcore.Metadata, h mimepart.Header, location string) {
+func mhtmlMetadata(md *gofastcore.Metadata, h rfc822.Header, location string) {
 	if md.Title == "" {
 		md.Title = gofastcore.ExpandLigatures(cleanLine(headerText(fieldValue(h, "Subject"))))
 	}

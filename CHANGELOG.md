@@ -1,11 +1,26 @@
 # Changelog
 
-## Unreleased
+## v0.7.0 (2026-11-27)
 
-- **go-fast-core v0.1.10** (was v0.1.6). Of the core code this module
-  uses, the only change since v0.1.6 is two new stored kinds:
-  `gofasthtml -stored=` now also accepts `shape_data` and `linked_data`,
-  which Visio drawings in go-fast-ooxml will use.
+- **go-fast-core's shared packages** (core v0.1.13, was v0.1.6 in the
+  last release): text is decoded with its `charset`, character references
+  resolved with its `entity` and MHTML read with its `rfc822`, in place of
+  this library's `internal/charset`, `internal/entity` and
+  `internal/mimepart`, which moved there. The same code, with what the
+  other libraries' copies added:
+  - **ISO-2022-JP is decoded** (it was refused with
+    `html.charset_unsupported`). Three dev MHTML files in the corpus have
+    their subject, an encoded word in ISO-2022-JP, decoded; three held-out
+    files changed too.
+  - **GBK byte 0x80 is the euro sign** (it was U+FFFD: the table, made
+    from Python's codec, lacked it).
+  - More labels: `cp932`, `cp936`, `cp949`, `cp950`, `windows-936`,
+    `windows-950`, `cp874`, `cp10000`, `latin9`.
+  Every other file of the corpus (html, mht, epub, md, srt, vtt, json,
+  jsonl, yaml) gives the same output; reading takes the same
+    instructions (within 0.2 %).
+- `gofasthtml -stored=` also accepts `shape_data` and `linked_data`, the
+  stored kinds go-fast-ooxml's Visio drawings use (core v0.1.10).
 
 ## v0.6.0 (2026-11-26)
 
