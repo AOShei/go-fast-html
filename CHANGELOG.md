@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.2
+
+- **The warning for a character reference that names no character says
+  "is read as U+FFFD"** ("N character references name no character …
+  and are read as U+FFFD"), where v0.7.1 said "appear as". The count
+  takes in every reference read, also in an attribute whose value does
+  not reach the output, so "appear" was not always true. The series
+  uses these words alike (go-fast-ooxml v0.7.1 already does).
+
 ## v0.7.1
 
 - **A character reference that names no character is warned of.**

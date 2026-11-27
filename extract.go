@@ -51,7 +51,7 @@ const (
 //	text.unmapped_glyphs      bytes that are not valid in the encoding read,
 //	                          or character references that name no
 //	                          character (&#0;, a surrogate, a number past
-//	                          U+10FFFF), appear as U+FFFD
+//	                          U+10FFFF), are read as U+FFFD
 //	image.unsupported_encoding  image data was asked for and an inline
 //	                          data: image could not be decoded
 //	input.repaired            an EPUB's zip archive has no readable central
@@ -846,7 +846,7 @@ func count(n int, one, many string) string {
 // references to no character, each read as U+FFFD.
 func replacedMessage(n int) string {
 	return count(n, "character reference names", "character references name") + " no character (&#0;, a surrogate or a number past U+10FFFF) and " +
-		map[bool]string{true: "appears", false: "appear"}[n == 1] + " as U+FFFD"
+		map[bool]string{true: "is", false: "are"}[n == 1] + " read as U+FFFD"
 }
 
 // builderCaps warns of the bounds of the tree builder that were reached,
