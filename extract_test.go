@@ -398,7 +398,7 @@ func TestLegacyCharsets(t *testing.T) {
 }
 
 func TestCharsetWarnings(t *testing.T) {
-	doc := extract(t, `<meta charset="iso-2022-jp"><p>x`, nil)
+	doc := extract(t, `<meta charset="utf-7"><p>x`, nil)
 	found := false
 	for _, w := range doc.Warnings {
 		found = found || w.Code == WarnCharsetUnsupported

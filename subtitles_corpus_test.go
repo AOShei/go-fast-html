@@ -13,7 +13,7 @@ import (
 	"unicode"
 
 	"github.com/AOShei/go-fast-core"
-	"github.com/AOShei/go-fast-html/internal/charset"
+	"github.com/AOShei/go-fast-core/charset"
 )
 
 // TestSubtitleCorpus extracts every srt and vtt file of the public

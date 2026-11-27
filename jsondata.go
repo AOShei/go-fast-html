@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/AOShei/go-fast-core"
-	"github.com/AOShei/go-fast-html/internal/charset"
+	"github.com/AOShei/go-fast-core/charset"
 	"github.com/AOShei/go-fast-html/internal/jsonscan"
 )
 

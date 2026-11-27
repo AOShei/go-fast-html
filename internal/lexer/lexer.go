@@ -17,7 +17,7 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"github.com/AOShei/go-fast-html/internal/entity"
+	"github.com/AOShei/go-fast-core/entity"
 )
 
 // Kind is the kind of a token.

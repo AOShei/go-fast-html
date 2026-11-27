@@ -11,10 +11,11 @@ import (
 	gofastcore "github.com/AOShei/go-fast-core"
 )
 
-// detectFile reads a file of internal/charset/testdata/detect.
+// detectFile reads a file of testdata/encoding: texts in legacy encodings,
+// copies of some of go-fast-core charset's testdata/detect.
 func detectFile(t *testing.T, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile("internal/charset/testdata/detect/" + name)
+	b, err := os.ReadFile("testdata/encoding/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
