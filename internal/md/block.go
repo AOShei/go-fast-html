@@ -86,6 +86,8 @@ type Doc struct {
 	// extended autolinks. Parse sets it; RenderSpec ignores it. Tables
 	// are always read.
 	GFM bool
+	// replaced counts the character references the parse read as U+FFFD.
+	replaced int
 }
 
 type parser struct {
@@ -100,6 +102,7 @@ type parser struct {
 	partiallyConsumedTab bool
 	allClosed            bool
 	refs                 map[string]Ref
+	replaced             int // character references read as U+FFFD
 }
 
 // Parse parses src, which must be UTF-8.
@@ -131,7 +134,7 @@ func Parse(ctx context.Context, src string) (*Doc, error) {
 	for p.tip != nil {
 		p.finalize(p.tip)
 	}
-	return &Doc{root: p.doc, refs: p.refs, GFM: true}, nil
+	return &Doc{root: p.doc, refs: p.refs, GFM: true, replaced: p.replaced}, nil
 }
 
 func (p *parser) peek(i int) int {
@@ -438,7 +441,9 @@ func (p *parser) finalize(b *block) {
 	case kCode:
 		if b.fenced {
 			first, rest, _ := strings.Cut(b.content, "\n")
-			b.info = unescape(strings.Trim(first, " \t"))
+			info := strings.Trim(first, " \t")
+			p.replaced += replacedIn(info)
+			b.info = unescape(info)
 			b.content = rest
 		} else {
 			lines := strings.Split(b.content, "\n")
@@ -490,12 +495,13 @@ func (p *parser) refdef(s string) int {
 	if !ok {
 		return 0
 	}
+	from, to := i, j // what the address and title are read from
 	i = j
 	before := i
 	title, titled := "", false
 	if k := spnl(s, i); k != i {
 		if t, m, ok := linkTitle(s, k); ok {
-			title, titled, i = t, true, m
+			title, titled, i, to = t, true, m, m
 		}
 	}
 	e := skipSpaceTab(s, i)
@@ -503,7 +509,7 @@ func (p *parser) refdef(s string) int {
 		if !titled {
 			return 0
 		}
-		title, i = "", before
+		title, i, to = "", before, before
 		e = skipSpaceTab(s, i)
 		if e < len(s) && s[e] != '\n' {
 			return 0
@@ -518,6 +524,7 @@ func (p *parser) refdef(s string) int {
 	}
 	if _, dup := p.refs[key]; !dup {
 		p.refs[key] = Ref{dest, title}
+		p.replaced += replacedIn(s[from:to])
 	}
 	return e
 }

@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.1
+
+- **A character reference that names no character is warned of.**
+  `&#0;`, a reference to a surrogate or to a number past U+10FFFF was
+  already read as U+FFFD, as the HTML standard says, but nothing said
+  so. It is now counted in a `text.unmapped_glyphs` warning of its own
+  ("N character references name no character … and appear as U+FFFD"),
+  beside the one for bytes not valid in the encoding. In HTML, XHTML,
+  EPUB chapters, MHTML, iframe `srcdoc` documents, Markdown (text, link
+  addresses and titles, definitions, a code fence's info string),
+  notebooks and WebVTT. A reference to U+FFFD itself is not counted.
+  go-fast-core v0.1.14 counts the same in XML
+  (`xmlscan.Stats.CharRefsReplaced`), for go-fast-xml and the Office
+  readers to report alike. No file of the corpus has such a reference:
+  every output is the same as v0.7.0's.
+- **README:** the paragraph on the legacy encodings described this
+  library's tables before v0.7.0 (ISO-2022-JP not decoded, user-defined
+  areas U+FFFD). It now describes go-fast-core's `charset`, which v0.7.0
+  reads with.
+
 ## v0.7.0 (2026-11-27)
 
 - **go-fast-core's shared packages** (core v0.1.13, was v0.1.6 in the

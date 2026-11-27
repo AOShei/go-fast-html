@@ -83,6 +83,9 @@ type Result struct {
 	// FrameCaps reports the bounds of the tree builder reached in iframe
 	// srcdoc documents.
 	FrameCaps dom.Caps
+	// FrameReplaced counts the character references read as U+FFFD in
+	// iframe srcdoc documents (dom.Doc.Replaced).
+	FrameReplaced int
 }
 
 // MaxMeta bounds the length of one metadata value.
@@ -588,6 +591,7 @@ func (w *walker) srcdoc(n *dom.Node, doc string) {
 		w.res.FrameFlattened = true
 	}
 	w.res.FrameCaps.Add(tree.Caps)
+	w.res.FrameReplaced += tree.Replaced
 	outer := n
 	if w.frame != nil {
 		outer = w.frame

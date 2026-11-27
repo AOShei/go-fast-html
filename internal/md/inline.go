@@ -92,6 +92,8 @@ type inliner struct {
 	noTick                           map[int]bool
 	noComment, noPI, noCDATA, noDecl bool
 	gfm                              bool
+	// replaced counts character references read as U+FFFD.
+	replaced *int
 }
 
 var special [256]bool
@@ -103,8 +105,9 @@ func init() {
 }
 
 // inlines parses the inline content s.
-func inlines(s string, refs map[string]Ref, gfm bool) *inode {
-	p := &inliner{s: s, root: &inode{kind: iRoot}, refs: refs, gfm: gfm}
+// replaced counts the character references read as U+FFFD.
+func inlines(s string, refs map[string]Ref, gfm bool, replaced *int) *inode {
+	p := &inliner{s: s, root: &inode{kind: iRoot}, refs: refs, gfm: gfm, replaced: replaced}
 	for p.pos < len(s) {
 		p.step()
 	}
@@ -177,7 +180,10 @@ func (p *inliner) step() {
 	case '<':
 		p.angle()
 	case '&':
-		if r, n := entityAt(s, p.pos); n > 0 {
+		if r, n, bad := entityAt(s, p.pos); n > 0 {
+			if bad {
+				*p.replaced++
+			}
 			p.text(r)
 			p.pos += n
 		} else {
@@ -497,17 +503,19 @@ func (p *inliner) closeBracket() {
 		i := spnl(s, p.pos+1)
 		if d, j, ok := linkDest(s, i, true); ok {
 			dest = d
+			from, to := i, j // what the address and title are read from
 			i = j
 			if k := spnl(s, i); k != i {
 				if t, m, ok := linkTitle(s, k); ok {
 					title = t
-					i = m
+					i, to = m, m
 				}
 			}
 			i = spnl(s, i)
 			if i < len(s) && s[i] == ')' {
 				p.pos = i + 1
 				matched = true
+				*p.replaced += replacedIn(s[from:to])
 			}
 		}
 	}
@@ -821,7 +829,7 @@ func linkTitle(s string, i int) (string, int, bool) {
 
 // entityAt reads an entity or numeric character reference at s[i], as
 // CommonMark recognizes them (always with a semicolon).
-func entityAt(s string, i int) (string, int) {
+func entityAt(s string, i int) (string, int, bool) {
 	j := i + 1
 	if j < len(s) && s[j] == '#' {
 		j++
@@ -834,30 +842,52 @@ func entityAt(s string, i int) (string, int) {
 			k++
 		}
 		if k == j || k >= len(s) || s[k] != ';' || hex && k-j > 6 || !hex && k-j > 7 {
-			return "", 0
+			return "", 0, false
 		}
 		base := 10
 		if hex {
 			base = 16
 		}
 		v, _ := strconv.ParseInt(s[j:k], base, 64)
-		r := rune(v)
 		if v == 0 || v > unicode.MaxRune || v >= 0xD800 && v <= 0xDFFF {
-			r = utf8.RuneError
+			return string(utf8.RuneError), k + 1 - i, true
 		}
-		return string(r), k + 1 - i
+		return string(rune(v)), k + 1 - i, false
 	}
 	k := j
 	for k < len(s) && k-j <= entity.MaxName && isAlnum(s[k]) {
 		k++
 	}
 	if k == j || k >= len(s) || s[k] != ';' {
-		return "", 0
+		return "", 0, false
 	}
 	if r, ok := entity.Lookup(s[j : k+1]); ok {
-		return r, k + 1 - i
+		return r, k + 1 - i, false
 	}
-	return "", 0
+	return "", 0, false
+}
+
+// replacedIn counts the character references in s, text that unescape
+// reads, that name no character and are read as U+FFFD.
+func replacedIn(s string) int {
+	if !strings.Contains(s, "&#") {
+		return 0
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\\' && i+1 < len(s) && isPunctASCII(s[i+1]):
+			i++
+		case c == '&':
+			if _, k, bad := entityAt(s, i); k > 0 {
+				if bad {
+					n++
+				}
+				i += k - 1
+			}
+		}
+	}
+	return n
 }
 
 // unescape resolves backslash escapes and character references.
@@ -872,7 +902,7 @@ func unescape(s string) string {
 			b.WriteByte(s[i+1])
 			i++
 		case c == '&':
-			if r, n := entityAt(s, i); n > 0 {
+			if r, n, _ := entityAt(s, i); n > 0 {
 				b.WriteString(r)
 				i += n - 1
 			} else {

@@ -48,8 +48,10 @@ const (
 //	                          pictures, stylesheets, scripts, frames, a
 //	                          refresh to another address, a form's target;
 //	                          nothing is fetched
-//	text.unmapped_glyphs      bytes that are not valid in the encoding read
-//	                          appear as U+FFFD
+//	text.unmapped_glyphs      bytes that are not valid in the encoding read,
+//	                          or character references that name no
+//	                          character (&#0;, a surrogate, a number past
+//	                          U+10FFFF), appear as U+FFFD
 //	image.unsupported_encoding  image data was asked for and an inline
 //	                          data: image could not be decoded
 //	input.repaired            an EPUB's zip archive has no readable central
@@ -647,6 +649,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 
 	page, source := decoded, m.Source
 	var fm frontMatter
+	mdReplaced := 0 // character references the Markdown read as U+FFFD
 	if format == "md" {
 		mdText := decoded
 		if pc.frontMatter != nil {
@@ -677,6 +680,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 		}
 		page = h.B
 		source = func(i int) int64 { return m.Source(h.Source(i)) }
+		mdReplaced = h.Replaced
 	}
 
 	var fmBlock []gofastcore.Block
@@ -690,6 +694,7 @@ func (e *Extractor) page(ctx context.Context, src []byte, format string, pc page
 	if err != nil {
 		return nil, err
 	}
+	w.replaced += mdReplaced
 	part.Blocks = w.res.Blocks
 	if len(fmBlock) > 0 {
 		part.Blocks = append(fmBlock, part.Blocks...)
@@ -705,6 +710,10 @@ type walked struct {
 	res     *blocks.Result
 	caps    dom.Caps
 	limited bool
+	// replaced counts the character references to no character read as
+	// U+FFFD, in the page and the Markdown it was made of; those in
+	// iframe srcdoc documents are in res.FrameReplaced.
+	replaced int
 	// left ends the warning that the text budget cut the part off, as
 	// with the number of a notebook's cells not read.
 	left string
@@ -728,7 +737,7 @@ func (e *Extractor) walk(ctx context.Context, page []byte, source func(int) int6
 	if err != nil {
 		return walked{}, err
 	}
-	return walked{res: res, caps: tree.Caps, limited: tree.Limited}, nil
+	return walked{res: res, caps: tree.Caps, limited: tree.Limited, replaced: tree.Replaced}, nil
 }
 
 // report adds to part, whose blocks are set, the warnings of what the
@@ -757,6 +766,10 @@ func (e *Extractor) report(part *gofastcore.Part, w walked, cut bool, pc pageCon
 	caps := w.caps
 	caps.Add(res.FrameCaps)
 	builderCaps(part, caps)
+	if n := w.replaced + res.FrameReplaced; n > 0 {
+		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextUnmappedGlyphs,
+			replacedMessage(n))
+	}
 	if res.Cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
 			textCutMessage(part.Kind)+w.left)
@@ -827,6 +840,13 @@ func count(n int, one, many string) string {
 		return "1 " + one
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+// replacedMessage is the text.unmapped_glyphs message for n character
+// references to no character, each read as U+FFFD.
+func replacedMessage(n int) string {
+	return count(n, "character reference names", "character references name") + " no character (&#0;, a surrogate or a number past U+10FFFF) and " +
+		map[bool]string{true: "appears", false: "appear"}[n == 1] + " as U+FFFD"
 }
 
 // builderCaps warns of the bounds of the tree builder that were reached,

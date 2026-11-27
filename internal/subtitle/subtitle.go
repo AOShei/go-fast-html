@@ -68,6 +68,10 @@ type Item struct {
 	Voices []string
 	// Controls counts the control characters dropped from the text.
 	Controls int
+	// Replaced counts the character references to no character (&#0;, a
+	// surrogate, a number past U+10FFFF) read as U+FFFD, in the text and
+	// the voices.
+	Replaced int
 	// Cut says that the text was longer than MaxText and was cut there.
 	Cut bool
 	// Deep says that WebVTT tags nested deeper than the bound given VTT;
@@ -221,6 +225,7 @@ func SRT(ctx context.Context, src []byte, yield func(*Item) bool) error {
 		it.Text, it.Spans, it.Cut = b.finish()
 		it.Cut = it.Cut || over
 		it.Controls = ctrl + b.controls
+		it.Replaced = b.replaced
 		body, hasText, blank, ctrl, over = body[:0], false, false, 0, false
 		return yield(it)
 	}
@@ -438,6 +443,7 @@ func VTT(ctx context.Context, src []byte, maxDepth int, yield func(*Item) bool) 
 		it.Text, it.Spans, it.Cut = b.finish()
 		it.Cut = it.Cut || over
 		it.Controls = ctrl + b.controls
+		it.Replaced = b.replaced
 		ctrl = 0
 		if !yield(it) {
 			return h, nil
@@ -565,6 +571,7 @@ type builder struct {
 	spans    []gofastcore.Span
 	cut      bool
 	controls int
+	replaced int  // character references read as U+FFFD
 	verb     bool // verbatim: ligatures kept, nothing trimmed but line ends
 }
 
@@ -774,7 +781,10 @@ func vttText(s []byte, w *builder, voices *[]string, maxDepth int) (deep bool) {
 		c := s[i]
 		switch {
 		case c == '&':
-			r, n := reference(s[i:])
+			r, n, bad := reference(s[i:])
+			if bad {
+				w.replaced++
+			}
 			if n == 0 {
 				w.add('&')
 				i++
@@ -831,7 +841,9 @@ func vttText(s []byte, w *builder, voices *[]string, maxDepth int) (deep bool) {
 				if voiceLen > MaxVoices {
 					break // the list is full
 				}
-				if a := annotation(tag); a != "" && !seen[a] {
+				a, bad := annotation(tag)
+				w.replaced += bad
+				if a != "" && !seen[a] {
 					seen[a] = true
 					if len(*voices) > 0 {
 						voiceLen += 2
@@ -877,10 +889,12 @@ func tagName(t []byte) string {
 // annotation is what follows a tag's name and classes, with its white
 // space collapsed, control characters, ligatures and references dealt
 // with as in text.
-func annotation(t []byte) string {
+//
+// It also returns the number of references read as U+FFFD.
+func annotation(t []byte) (string, int) {
 	i := bytes.IndexAny(t, " \t\n\f")
 	if i < 0 {
-		return ""
+		return "", 0
 	}
 	b := newBuilder()
 	for _, f := range bytes.Fields(t[i:]) {
@@ -889,7 +903,10 @@ func annotation(t []byte) string {
 		}
 		for len(f) > 0 {
 			if f[0] == '&' {
-				if r, n := reference(f); n > 0 {
+				if r, n, bad := reference(f); n > 0 {
+					if bad {
+						b.replaced++
+					}
 					for _, x := range r {
 						b.add(x)
 					}
@@ -903,13 +920,13 @@ func annotation(t []byte) string {
 		}
 	}
 	s, _, _ := b.finish()
-	return s
+	return s, b.replaced
 }
 
 // reference reads the character reference at the start of s, which
 // begins with "&": what it stands for and its length, 0 when there is
-// none.
-func reference(s []byte) (string, int) {
+// none, and whether it names no character and is read as U+FFFD.
+func reference(s []byte) (string, int, bool) {
 	if len(s) > 2 && s[1] == '#' {
 		i, hex := 2, false
 		if s[i] == 'x' || s[i] == 'X' {
@@ -938,16 +955,17 @@ func reference(s []byte) (string, int) {
 		}
 	done:
 		if i == from {
-			return "", 0
+			return "", 0, false
 		}
 		if i < len(s) && s[i] == ';' {
 			i++
 		}
-		return string(entity.Numeric(v)), i
+		r := entity.Numeric(v)
+		return string(r), i, r == utf8.RuneError && v != utf8.RuneError
 	}
 	repl, n, _, ok := entity.Named(s[1:])
 	if !ok {
-		return "", 0
+		return "", 0, false
 	}
-	return repl, n + 1
+	return repl, n + 1, false
 }
