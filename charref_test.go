@@ -44,10 +44,10 @@ func TestCharRefsReplacedAreWarned(t *testing.T) {
 			t.Errorf("%s: %q, want %q", c.name, got[0], replacedMessage(c.n))
 		}
 	}
-	if m := replacedMessage(1); m != "1 character reference names no character (&#0;, a surrogate or a number past U+10FFFF) and appears as U+FFFD" {
+	if m := replacedMessage(1); m != "1 character reference names no character (&#0;, a surrogate or a number past U+10FFFF) and is read as U+FFFD" {
 		t.Errorf("one: %q", m)
 	}
-	if m := replacedMessage(2); m != "2 character references name no character (&#0;, a surrogate or a number past U+10FFFF) and appear as U+FFFD" {
+	if m := replacedMessage(2); m != "2 character references name no character (&#0;, a surrogate or a number past U+10FFFF) and are read as U+FFFD" {
 		t.Errorf("two: %q", m)
 	}
 }
