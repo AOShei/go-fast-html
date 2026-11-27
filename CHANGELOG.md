@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.3
+
+- **The warning for bytes not valid in the encoding says "read as
+  U+FFFD"** too, where it said "appear as": some of those bytes are in
+  no text given (a script's, a style sheet's). It also says "1 byte
+  sequence is", where it said "1 byte sequences are". Over the corpus,
+  three dev JSON files and two held-out files change, in that message
+  only.
+
 ## v0.7.2
 
 - **The warning for a character reference that names no character says

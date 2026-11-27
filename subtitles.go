@@ -79,7 +79,7 @@ func (e *Extractor) subtitles(ctx context.Context, doc *gofastcore.Document, src
 	decode.Take(int64(len(decoded)))
 	if invalid > 0 {
 		part.Warn(gofastcore.SeverityWarning, gofastcore.WarnTextUnmappedGlyphs,
-			fmt.Sprintf("%d byte sequences are not valid %s and appear as U+FFFD", invalid, encName))
+			invalidMessage(invalid, encName))
 	}
 	if cut {
 		part.Warn(gofastcore.SeverityError, gofastcore.WarnLimitExceeded,
