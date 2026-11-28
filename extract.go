@@ -845,6 +845,9 @@ func count(n int, one, many string) string {
 // invalidMessage is the text.unmapped_glyphs message for n byte sequences
 // that are not valid in the encoding enc, each read as U+FFFD.
 func invalidMessage(n int, enc string) string {
+	if enc == "utf-8" {
+		enc = "UTF-8" // as the series writes it; other encodings keep their label
+	}
 	return count(n, "byte sequence is", "byte sequences are") + " not valid " + enc + " and " +
 		map[bool]string{true: "is", false: "are"}[n == 1] + " read as U+FFFD"
 }

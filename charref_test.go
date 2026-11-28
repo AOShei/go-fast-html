@@ -57,10 +57,18 @@ func TestCharRefsReplacedAreWarned(t *testing.T) {
 // singular for one.
 func TestInvalidBytesMessage(t *testing.T) {
 	doc := extract(t, "<meta charset=\"utf-8\"><p>caf\xff au lait \xff</p>", nil)
-	if got := warnings(doc, gofastcore.WarnTextUnmappedGlyphs); len(got) != 1 || !strings.HasSuffix(got[0], " byte sequences are not valid utf-8 and are read as U+FFFD") {
+	if got := warnings(doc, gofastcore.WarnTextUnmappedGlyphs); len(got) != 1 || !strings.HasSuffix(got[0], " byte sequences are not valid UTF-8 and are read as U+FFFD") {
 		t.Errorf("%q", got)
 	}
 	if m := invalidMessage(1, "UTF-8"); m != "1 byte sequence is not valid UTF-8 and is read as U+FFFD" {
 		t.Errorf("one: %q", m)
+	}
+	// UTF-8 is written as the series writes it; another encoding keeps
+	// its label.
+	if m := invalidMessage(1, "utf-8"); m != "1 byte sequence is not valid UTF-8 and is read as U+FFFD" {
+		t.Errorf("utf-8: %q", m)
+	}
+	if m := invalidMessage(2, "big5"); m != "2 byte sequences are not valid big5 and are read as U+FFFD" {
+		t.Errorf("big5: %q", m)
 	}
 }
