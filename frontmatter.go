@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/AOShei/go-fast-core"
+	"github.com/AOShei/go-fast-core/charset"
 	"github.com/AOShei/go-fast-html/internal/blocks"
 	"github.com/AOShei/go-fast-html/internal/yaml"
 )
@@ -683,12 +684,9 @@ func cleanMeta(s string) (string, int) {
 	return strings.TrimSpace(s), n
 }
 
-func cutUTF8(s string, n int) string {
-	for n > 0 && s[n]&0xC0 == 0x80 {
-		n--
-	}
-	return strings.TrimSpace(s[:n])
-}
+// cutUTF8 cuts s to at most n bytes where a character starts, and trims
+// the white space the cut leaves.
+func cutUTF8(s string, n int) string { return strings.TrimSpace(charset.CutUTF8(s, n)) }
 
 // frontMatterBlock makes the code block of the front matter in src
 // (decoded text; source maps its offsets to the input's).

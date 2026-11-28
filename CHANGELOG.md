@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.7.4
+
+Pins go-fast-core v0.1.18 (after v0.1.13).
+
+- **The warning for bytes not valid in the encoding writes "UTF-8"**
+  for UTF-8, where it wrote the label "utf-8", as go-fast-ooxml,
+  go-fast-xml and go-fast-pdf write it. Other encodings keep their label
+  ("not valid big5"), as go-fast-xml's do. Over the corpus, three dev
+  JSON files and two held-out files change, in that message only.
+- **Front matter values are cut with core's `charset.CutUTF8`,** in place
+  of a copy of it; the output is the same.
+
 ## v0.7.3
 
 - **The warning for bytes not valid in the encoding says "read as
